@@ -13,7 +13,7 @@ if (-not $resolvedPath) {
 Write-Output "================================================================="
 Write-Output " WEBSITE 360 AUDIT SCANNER (8 Areas / 40 Questions + 09 SEO/GEO)"
 Write-Output " Target: $resolvedPath"
-Write-Output " Database Reference: C:/Users/лахушка/Desktop/websites/database"
+Write-Output " Database Reference: $env:USERPROFILE/Desktop/websites/database"
 Write-Output "================================================================="
 
 $excludeDirs = @("node_modules", ".git", ".next", "dist", "build", ".astro", ".svelte-kit", "vendor", "database")
@@ -42,7 +42,7 @@ $allStyles = ($styleFiles | ForEach-Object { Get-Content $_.FullName -Raw }) -jo
 function Report-Check {
     param([string]$Code, [string]$Name, [bool]$Passed, [string]$Details)
     $status = if ($Passed) { "[PASS]" } else { "[WARN/FAIL]" }
-    Write-Output ("{0,-12} {1,-6} {2} — {3}" -f $Code, $status, $Name, $Details)
+    Write-Output ("{0,-12} {1,-12} {2} - {3}" -f $Code, $status, $Name, $Details)
 }
 
 Write-Output "`n--- 01. NAWIGACJA (Navigation & Information Architecture) ---"
