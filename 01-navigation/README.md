@@ -1,105 +1,59 @@
-# 01. Nawigacja / Навигация и информационная архитектура
+# 01. Nawigacja i Architektura Informacji
 
-> **Базовый вопрос чек-листа («Osiem obszarów, czterdzieści pytań»):**
-> *«Czy z każdej podstrony wrócisz na stronę główną?»* — **Можно ли с каждой подстраницы вернуться на главную страницу?**
-
----
-
-## 1. Обзор категории и инженерная роль
-
-Навигация и информационная архитектура (Information Architecture, IA) определяют способность пользователя и поискового/ИИ-агента ориентироваться в пространстве сайта, понимать свое текущее местоположение (`Wayfinding`), перемещаться между разделами без когнитивной перегрузки и выходить из тупиковых состояний (`404`, пустая выдача).
+> **Pytanie główne z listy kontrolnej («Osiem obszarów, czterdzieści pytań»):**
+> *«Czy z każdej podstrony wrócisz na stronę główną?»*
 
 ---
 
-## 2. Пять контрольных вопросов аудита (5/40) и технические метрики
+## 1. Rola kategorii w architekturze strony
 
-### Q1.1. Возврат на главную и глобальная точка опоры (`Home & Global Anchor`)
-* **Вопрос (PL / RU):** *Czy z każdej podstrony wrócisz na stronę główną?* / Можно ли с любой вложенной подстраницы, страницы ошибки и шага воронки в один клик вернуться на главную страницу, а также пропустить сквозные блоки с клавиатуры?
-* **Инженерные критерии проверки:**
-  * В `<header>` присутствует кликабельный логотип `<a href="/">` с доступным именем (`aria-label="[Бренд] — Главная страница"` или информативный `alt` у `<img>`/`<svg>`).
-  * Первым фокусируемым элементом в DOM (`body > a.skip-link:first-child`) идет ссылка **Skip to main content** (`href="#main-content"`), видимая при `:focus-visible`.
-
-### Q1.2. Индикация текущего местоположения и «хлебные крошки» (`Wayfinding, Active State & Breadcrumbs`)
-* **Вопрос (PL / RU):** *Czy użytkownik zawsze wie, gdzie aktualnie się znajduje w strukturze serwisu?* / Понимает ли пользователь свое текущее положение в иерархии сайта визуально, программно (для скринридеров) и на уровне структуры URL?
-* **Инженерные критерии проверки:**
-  * Активный пункт главного и бокового меню содержит атрибут `aria-current="page"` и визуально выделен не только цветом (линия, жирность шрифта, фон).
-  * Для страниц уровня вложенности $\ge 2$ выводится навигационная цепочка `<nav aria-label="Breadcrumb"><ol>...</ol></nav>` с `aria-current="page"` на текущем элементе и микроразметкой `Schema.org/BreadcrumbList` (JSON-LD).
-
-### Q1.3. Предсказуемость, таксономия и глубина навигации (`Information Architecture & Shallow Depth`)
-* **Вопрос (PL / RU):** *Czy główne menu jest spójne, zrozumiałe i pozwala dotrzeć do kluczowych treści w maksymalnie 3 kliknięciach?* / Является ли глобальная навигация консистентной на всех страницах, свободной от перегруза (Закон Миллера / Закон Хика) и достигается ли целевой контент за $\le 3$ клика?
-* **Инженерные критерии проверки:**
-  * Верхний уровень главной навигации `<nav aria-label="Primary">` содержит **от 4 до 7 пунктов** (максимум 8 включая кнопку CTA).
-  * Выпадающие мега-меню открываются по клику или с безопасной задержкой hover ($\ge 150\text{ мс}$ + safe polygon траектории курсора), закрываются по `Escape` и управляются клавишами `ArrowDown`/`ArrowUp`/`Tab`.
-
-### Q1.4. Эргономика мобильной навигации и тач-зон (`Mobile Drawer, Bottom Bar & Touch Ergonomics`)
-* **Вопрос (PL / RU):** *Czy nawigacja mobilna jest łatwo dostępna pod kciukiem i poprawnie zarządza fokusem?* / Удобна ли мобильная навигация для управления одной рукой (thumb zone) и соблюдены ли правила удержания фокуса в открытом меню?
-* **Инженерные критерии проверки:**
-  * Все интерактивные элементы навигации имеют размер зоны нажатия **$\ge 44 \times 44\text{ CSS px}$** (Apple HIG / WCAG 2.5.5) и минимум **$24 \times 24\text{ CSS px}$** (WCAG 2.2 AA 2.5.8).
-  * Кнопка мобильного меню (`<button aria-expanded="false|true" aria-controls="mobile-drawer">`) переключает состояние, удерживает фокус внутри открытого drawer (`FocusTrap` / атрибут `inert` на основном контенте) и блокирует фоновый скролл.
-
-### Q1.5. Внутренний поиск, палитра команд и обработка тупиков (`Search, Command Menu & Dead-End Recovery`)
-* **Вопрос (PL / RU):** *Czy serwis oferuje szybką wyszukiwarkę oraz pomocne wyjście ze stron błędów (404 / brak wyników)?* / Предусмотрен ли быстрый поиск (или палитра команд `Cmd+K`) и помогают ли страницы пустой выдачи / 404 продолжить путь без потери пользователя?
-* **Инженерные критерии проверки:**
-  * Поисковая форма обернута в семантический тег `<search>` или `<form role="search">`, поддерживает автодополнение (`role="combobox"`, `aria-autocomplete="list"`) и быстрый вызов по `/` или `Cmd+K` (`Ctrl+K`).
-  * Страница `404 Not Found` и экран «Ничего не найдено» содержат строку поиска, ссылки на ключевые разделы и кнопку возврата на главную.
+Nawigacja i architektura informacji (Information Architecture — IA) decydują o tym, czy użytkownik oraz roboty indeksujące potrafią bez wysiłku zorientować się w strukturze witryny (`Wayfinding`), przejść do kluczowych sekcji w maksymalnie 3 kliknięciach oraz bezpiecznie wyjść ze stron błędów (`404`) lub pustych wyników wyszukiwania.
 
 ---
 
-## 3. Верифицированные репозитории и базы данных корпораций
+## 2. Pięć pytań kontrolnych audytu (1–5 z 40) i kryteria inżynieryjne
 
-| № | Репозиторий | Владелец / Организация | Описание и ценность | Статус в `database/01-navigation/` |
+### Q1.1. Powrót na stronę główną i pomijanie bloków (`Home & Global Anchor`)
+* **Pytanie:** *Czy z każdej podstrony wrócisz na stronę główną?*
+* **Kryteria weryfikacji:**
+  * W nagłówku `<header>` znajduje się klikalne logo `<a href="/">` z czytelną nazwą dostępną (`aria-label="[Marka] — Strona główna"` lub atrybutem `alt`).
+  * Pierwszym elementem fokusowalnym w drzewie DOM (`body > a.skip-link:first-child`) jest link **Przejdź do głównej treści** (`href="#main-content"`), widoczny po naciśnięciu klawisza `Tab` (`:focus-visible`).
+
+### Q1.2. Wskazanie bieżącej lokalizacji i ścieżka powrotu (`Wayfinding & Breadcrumbs`)
+* **Pytanie:** *Czy użytkownik zawsze wie, gdzie aktualnie się znajduje w strukturze serwisu?*
+* **Kryteria weryfikacji:**
+  * Aktywna pozycja menu posiada atrybut `aria-current="page"` oraz wyróżnienie wizualne niezależne od samego koloru (linia, pogrubienie, tło).
+  * Na wszystkich podstronach od 2. poziomu zagnieżdżenia widoczna jest ścieżka powrotu `<nav aria-label="Breadcrumb"><ol>...</ol></nav>` z mikrodanymi `Schema.org/BreadcrumbList` (JSON-LD).
+
+### Q1.3. Przewidywalność menu i płytka głębokość kliknięć (`Shallow Depth <= 3 Clicks`)
+* **Pytanie:** *Czy główne menu jest spójne, zrozumiałe i pozwala dotrzeć do kluczowych treści w maksymalnie 3 kliknięciach?*
+* **Kryteria weryfikacji:**
+  * Główny poziom nawigacji `<nav aria-label="Główna nawigacja">` zawiera **od 4 do 7 elementów** (zgodnie z prawem Hicka i Millera).
+  * Rozwijane menu obsługują klawisze `Escape`, `ArrowDown`/`ArrowUp` oraz bezpieczny trójkąt trajektorii kursora (*safe polygon*).
+
+### Q1.4. Ergonomia nawigacji mobilnej (`Mobile Drawer & Touch Targets`)
+* **Pytanie:** *Czy nawigacja mobilna jest łatwo dostępna pod kciukiem i poprawnie zarządza fokusem?*
+* **Kryteria weryfikacji:**
+  * Wszystkie linki i przyciski nawigacyjne posiadają obszar dotyku **$\ge 44 \times 44\text{ CSS px}$** (minimum WCAG 2.2 AA: $24 \times 24\text{ CSS px}$).
+  * Przycisk menu mobilnego posiada `aria-expanded="false|true"`, blokuje przewijanie tła i zamyka fokus wewnątrz otwartego panelu (`FocusTrap` / atrybut `inert`).
+
+### Q1.5. Wyszukiwarka wewnętrzna, Command Palette i obsługa błędów 404 (`Search & Dead-End Recovery`)
+* **Pytanie:** *Czy serwis oferuje szybką wyszukiwarkę oraz pomocne wyjście ze stron błędów (404 / brak wyników)?*
+* **Kryteria weryfikacji:**
+  * Pole wyszukiwania jest umieszczone w znaczniku `<search>` lub `<form role="search">` i obsługuje skrót klawiszowy `/` lub `⌘K` (`Ctrl+K`).
+  * Strona `404 Not Found` zawiera wyszukiwarkę, linki do najpopularniejszych sekcji oraz przycisk powrotu na stronę główną.
+
+---
+
+## 3. Źródła i Zweryfikowane Repozytoria Korporacyjne
+
+| Nr | Repozytorium i link źródłowy | Właściciel / Organizacja | Opis i zastosowanie | Status w `database/01-navigation/` |
 | :--- | :--- | :--- | :--- | :--- |
-| 1 | **[w3c/aria-practices](https://github.com/w3c/aria-practices)** | **W3C (WAI-ARIA WG)** | Официальный **ARIA Authoring Practices Guide (APG)**: эталонные паттерны `Breadcrumb`, `Navigation Menubar`, `Disclosure Navigation`, `Tabs`, `Treeview` и `Landmarks`. | Локальный клон (`./w3c-aria-practices`) |
-| 2 | **[pacocoursey/cmdk](https://github.com/pacocoursey/cmdk)** | **Paco Coursey / Vercel Ecosystem** | Индустриальный стандарт быстрой клавиатурной навигации и палитры команд (`⌘K`), используемый в Vercel, Linear и Shadcn UI. | Локальный клон (`./cmdk`) |
-| 3 | **[uswds/uswds](https://github.com/uswds/uswds)** | **U.S. General Services Administration** | **U.S. Web Design System**: федеральный стандарт государственной навигации США (`usa-header`, `usa-nav`, `usa-breadcrumb`, `usa-in-page-navigation`, `usa-skipnav`). | Внешний эталон |
-| 4 | **[alphagov/govuk-frontend](https://github.com/alphagov/govuk-frontend)** | **UK Government Digital Service** | **GOV.UK Frontend**: британский государственный эталон доступной навигации (`govuk-breadcrumbs`, `govuk-service-navigation`, `govuk-pagination`). | Внешний эталон |
-| 5 | **[TanStack/router](https://github.com/TanStack/router)** | **TanStack** | Типобезопасная маршрутизация с URL Search Params как базой состояния, предзагрузкой по `intent` и восстановлением позиции скролла. | Внешний эталон |
-| 6 | **[radix-ui/primitives](https://github.com/radix-ui/primitives)** | **WorkOS / Radix UI** | Headless-компоненты `NavigationMenu` и `DropdownMenu` с roving `tabindex` и защитой траектории курсора (safe polygon). | Внешний эталон |
-| 7 | **[adobe/react-spectrum](https://github.com/adobe/react-spectrum)** | **Adobe** | Корпоративная библиотека хуков `React Aria` (`useMenu`, `useBreadcrumbs`, `useTabList`, `useLandmark`) с полной поддержкой скринридеров. | Внешний эталон |
-| 8 | **[carbon-design-system/carbon](https://github.com/carbon-design-system/carbon)** | **IBM** | Эталон проектирования корпоративного каркаса `UI Shell` (Global Header, Side Nav, Switcher) по стандарту IBM Accessibility. | Внешний эталон |
-
----
-
-## 4. Эталонная HTML/ARIA-разметка навигационного каркаса
-
-```html
-<!-- 1. Skip Link (первый элемент в <body>) -->
-<a href="#main-content" class="skip-link">Перейти к основному содержимому</a>
-
-<!-- 2. Global Header с возвратом на главную и основным меню -->
-<header role="banner" class="site-header">
-  <a href="/" class="brand-logo" aria-label="Название Компании — На главную">
-    <img src="/logo.svg" alt="" width="140" height="36" />
-  </a>
-
-  <nav aria-label="Основная навигация">
-    <ul class="nav-list">
-      <li><a href="/catalog" aria-current="page">Каталог</a></li>
-      <li><a href="/solutions">Решения</a></li>
-      <li><a href="/pricing">Тарифы</a></li>
-      <li><a href="/docs">Документация</a></li>
-      <li><a href="/contact">Контакты</a></li>
-    </ul>
-  </nav>
-
-  <search role="search" aria-label="Поиск по сайту">
-    <button type="button" aria-keyshortcuts="Control+K Meta+K">
-      Поиск <kbd>⌘K</kbd>
-    </button>
-  </search>
-</header>
-
-<!-- 3. Breadcrumbs (на всех вложенных страницах >= 2 уровня) -->
-<nav aria-label="Хлебные крошки" class="breadcrumbs">
-  <ol itemscope itemtype="https://schema.org/BreadcrumbList">
-    <li itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
-      <a itemprop="item" href="/"><span itemprop="name">Главная</span></a>
-      <meta itemprop="position" content="1" />
-    </li>
-    <li itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
-      <a itemprop="item" href="/catalog" aria-current="page"><span itemprop="name">Каталог</span></a>
-      <meta itemprop="position" content="2" />
-    </li>
-  </ol>
-</nav>
-```
+| 1 | **[w3c/aria-practices](https://github.com/w3c/aria-practices)** | **W3C (WAI-ARIA WG)** | Oficjalne repozytorium **ARIA Authoring Practices Guide (APG)**: wzorce `Breadcrumb`, `Navigation Menubar`, `Disclosure Navigation`, `Tabs`, `Treeview`. | Sklonowano lokalnie (`./w3c-aria-practices`) |
+| 2 | **[pacocoursey/cmdk](https://github.com/pacocoursey/cmdk)** | **Paco Coursey / Vercel** | Standard branżowy palety poleceń i szybkiej nawigacji klawiaturą (`⌘K`), używany przez Vercel i Linear. | Sklonowano lokalnie (`./cmdk`) |
+| 3 | **[uswds/uswds](https://github.com/uswds/uswds)** | **U.S. General Services Administration** | **U.S. Web Design System**: federalny standard nawigacji rządowej USA (`usa-header`, `usa-nav`, `usa-breadcrumb`, `usa-skipnav`). | Źródło referencyjne |
+| 4 | **[alphagov/govuk-frontend](https://github.com/alphagov/govuk-frontend)** | **UK Government Digital Service** | **GOV.UK Frontend**: brytyjski standard dostępnej nawigacji (`govuk-breadcrumbs`, `govuk-service-navigation`). | Źródło referencyjne |
+| 5 | **[TanStack/router](https://github.com/TanStack/router)** | **TanStack** | Typowany router ze stanem w parametrach URL, preloadingiem `intent` i przywracaniem pozycji przewijania. | Źródło referencyjne |
+| 6 | **[radix-ui/primitives](https://github.com/radix-ui/primitives)** | **WorkOS / Radix UI** | Dostępne prymitywy `NavigationMenu` i `DropdownMenu` z obsługą roving `tabindex`. | Źródło referencyjne |
+| 7 | **[adobe/react-spectrum](https://github.com/adobe/react-spectrum)** | **Adobe Inc.** | Biblioteka `React Aria` (`useMenu`, `useBreadcrumbs`, `useTabList`, `useLandmark`). | Źródło referencyjne |
+| 8 | **[carbon-design-system/carbon](https://github.com/carbon-design-system/carbon)** | **IBM** | Korporacyjny standard nawigacji `UI Shell` (Global Header, Side Nav, Switcher). | Źródło referencyjne |
