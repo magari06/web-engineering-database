@@ -1,0 +1,4635 @@
+// Copyright 2026 Adobe. All rights reserved.
+// This file is licensed to you under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License. You may obtain a copy
+// of the License at http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under
+// the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+// OF ANY KIND, either express or implied. See the License for the specific language
+// governing permissions and limitations under the License.
+
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+use std::sync::OnceLock;
+
+use chrono::Utc;
+
+mod authoring;
+mod changelog;
+mod data;
+mod format;
+mod lifecycle;
+mod render_batch;
+mod spec_sheet;
+
+use std::collections::{HashMap, HashSet};
+
+use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
+use design_data_core::cache;
+use design_data_core::cascade::{self, resolve_property, ResolutionContext};
+use design_data_core::compat::{
+    load_snapshot, snapshot_matches, write_snapshot, ValidationSnapshot,
+};
+use design_data_core::data_source::{self, CliPathOverrides};
+use design_data_core::diff;
+use design_data_core::diff::display_name;
+use design_data_core::export::TokenExporter;
+use design_data_core::graph::{TokenGraph, TokenRecord};
+use design_data_core::legacy;
+use design_data_core::manifest;
+use design_data_core::migrate;
+use design_data_core::naming;
+use design_data_core::naming::NamingExceptionsFile;
+use design_data_core::primer;
+use design_data_core::query;
+use design_data_core::schema::SchemaRegistry;
+use design_data_core::suggest;
+use design_data_core::text_metrics::TextMetrics;
+use design_data_core::validate;
+use design_data_core::visual;
+use design_data_core::write::{write_token, WriteTokenInput};
+use design_data_dtcg as dtcg;
+use design_data_figma as figma;
+use design_data_tui::{LaunchOptions, ThemeChoice};
+use miette::{IntoDiagnostic, WrapErr};
+
+/// Spectrum Design Data tooling — validate and migrate design tokens.
+///
+/// Run with no arguments to launch the interactive TUI. Pass a subcommand for
+/// non-interactive use.
+#[derive(Parser)]
+#[command(
+    name = "design-data",
+    version,
+    about,
+    args_conflicts_with_subcommands = true,
+    subcommand_negates_reqs = true
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+    /// TUI launch options (used when no subcommand is given).
+    #[command(flatten)]
+    tui: TuiArgs,
+    /// Select a named `[platforms.<id>]` entry from `.design-data.toml` (h890.27.3).
+    /// Available on every subcommand. Outranked only by a subcommand's own
+    /// `--manifest`; outranks `DESIGN_DATA_PLATFORM` and `default_platform`.
+    ///
+    /// Known limitation: place `--platform` *after* the subcommand name
+    /// (e.g. `design-data validate-manifest --platform foo`). Putting it
+    /// *before* the subcommand can be misparsed as the bare-invocation TUI
+    /// positional `DATASET` argument, since this top-level `Cli` also has an
+    /// optional positional flattened in via `TuiArgs`.
+    #[arg(long, global = true)]
+    platform: Option<String>,
+}
+
+/// Arguments for launching the interactive TUI (bare invocation or `tui` subcommand).
+#[derive(Args)]
+struct TuiArgs {
+    /// Path to the token dataset directory (default: current directory).
+    #[arg(value_name = "DATASET")]
+    dataset: Option<PathBuf>,
+    /// Path to the components directory (default: spec-bundled).
+    #[arg(long)]
+    components: Option<PathBuf>,
+    /// Path to the mode-sets directory (default: spec-bundled).
+    #[arg(long = "mode-sets")]
+    mode_sets: Option<PathBuf>,
+    /// Enable real disk writes from the wizard (Screen 4 Submit).
+    #[arg(long)]
+    allow_write: bool,
+    /// Color theme (`terminal` or `spectrum`).
+    #[arg(long, value_enum, default_value_t = ThemeChoice::Terminal)]
+    theme: ThemeChoice,
+    /// Do not restore an in-progress wizard draft from the previous session.
+    #[arg(long)]
+    no_resume_wizard: bool,
+    /// Record every dispatched Message to this file as NDJSON for later replay.
+    #[arg(long, conflicts_with = "replay")]
+    record: Option<PathBuf>,
+    /// Replay a previously recorded NDJSON message stream and print the final buffer.
+    #[arg(long)]
+    replay: Option<PathBuf>,
+    /// Run headless (no TTY), replay messages if given, and print the final frame as ANSI SGR.
+    #[arg(long)]
+    snapshot_ansi: bool,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Inspect configured `[platforms.<id>]` manifest profiles (h890.27.6)
+    Platform {
+        #[command(subcommand)]
+        sub: PlatformSub,
+    },
+    /// Validate design data against JSON Schemas (Layer 1) and catalog rules (Layer 2)
+    Validate {
+        /// Path to a JSON file or directory to validate
+        #[arg(value_name = "PATH")]
+        path: Option<PathBuf>,
+        /// Output format
+        #[arg(long, value_enum, default_value_t = OutputFormat::Pretty)]
+        format: OutputFormat,
+        /// Root directory containing `token-types/` and `token-file.json`
+        #[arg(long, value_name = "DIR")]
+        schema_path: Option<PathBuf>,
+        /// Path to naming-exceptions.json allowlist for SPEC-007
+        #[arg(long, value_name = "FILE")]
+        exceptions_path: Option<PathBuf>,
+        /// Directory containing spec-format mode set declaration JSON files
+        #[arg(long, value_name = "DIR")]
+        mode_sets_path: Option<PathBuf>,
+        /// Directory containing spec-format component declaration JSON files (enables SPEC-028/029 on components)
+        #[arg(long, value_name = "DIR")]
+        components_path: Option<PathBuf>,
+        /// Directory containing Component/Token Relationship (CTR) JSON files (enables SPEC-055 target resolution)
+        #[arg(long, value_name = "DIR")]
+        relationships_path: Option<PathBuf>,
+        /// Directory containing component visual recipe JSON files (enables SPEC-060..063)
+        #[arg(long, value_name = "DIR")]
+        visuals_path: Option<PathBuf>,
+        /// Directory containing icon sets (enables SPEC-085/086 on recipes; default: probed
+        /// `packages/design-data/icons`)
+        #[arg(long, value_name = "DIR")]
+        icons_path: Option<PathBuf>,
+        /// Directory containing sidecar name maps (mirrors tokens/src layout); merges name objects at ingest
+        #[arg(long, value_name = "DIR")]
+        names_dir: Option<PathBuf>,
+        /// Downgrade component-aware rule errors (SPEC-018/020/022/026/027/031/035/040) to
+        /// warnings so `--components-path` can be loaded without failing on a pre-existing
+        /// backlog. Transitional flag for burn-down; see bead spectrum-design-data-0jm.
+        #[arg(long)]
+        components_report_only: bool,
+        /// Treat warnings as errors
+        #[arg(long)]
+        strict: bool,
+    },
+    /// Validate a whole dataset directory: SPEC-044 structure pre-check, tokens,
+    /// and the registered catalog directories (fields, components, mode-sets, registry)
+    ValidateDataset {
+        /// Path to the dataset root (or its tokens/ dir). Default: current directory.
+        #[arg(value_name = "PATH")]
+        path: Option<PathBuf>,
+        /// Output format
+        #[arg(long, value_enum, default_value_t = OutputFormat::Pretty)]
+        format: OutputFormat,
+        /// Root directory containing legacy `token-types/` and `token-file.json`
+        #[arg(long, value_name = "DIR")]
+        schema_path: Option<PathBuf>,
+        /// Directory containing the design-data-spec schemas (field/component/mode-set/registry)
+        #[arg(long, value_name = "DIR")]
+        spec_schemas: Option<PathBuf>,
+        /// Path to naming-exceptions.json allowlist for SPEC-007
+        #[arg(long, value_name = "FILE")]
+        exceptions_path: Option<PathBuf>,
+        /// Treat warnings as errors
+        #[arg(long)]
+        strict: bool,
+    },
+    /// Validate the configured Layer 2 platform manifest (Foundation→Platform cascade):
+    /// Layer 1 schema-shape check plus apply-time include/exclude and override-target
+    /// resolution — the same validation `query` enforces, without running a query.
+    ValidateManifest {
+        /// Path to the dataset root (or its tokens/ dir). Default: current directory.
+        #[arg(value_name = "PATH")]
+        path: Option<PathBuf>,
+        /// Explicit platform manifest.json (overrides the `.design-data.toml` `manifest` key)
+        #[arg(long, value_name = "FILE")]
+        manifest: Option<PathBuf>,
+        /// Output format
+        #[arg(long, value_enum, default_value_t = OutputFormat::Pretty)]
+        format: OutputFormat,
+    },
+    /// Write a static, server-free component explorer built from visual recipes (draft)
+    Site {
+        /// Output directory (publishable as-is, e.g. to GitHub Pages)
+        #[arg(long, value_name = "DIR")]
+        out: PathBuf,
+        /// Restrict to these components (comma-separated); default is all
+        #[arg(long, value_delimiter = ',', value_name = "NAMES")]
+        components: Vec<String>,
+        /// Directory containing visual recipes (default: sibling `visuals/` of the tokens root)
+        #[arg(long, value_name = "DIR")]
+        visuals_path: Option<PathBuf>,
+        /// Directory containing cascade-format .tokens.json files
+        #[arg(long, value_name = "PATH")]
+        path: Option<PathBuf>,
+        /// Text-measurement table written to the site and used by its renderer (default: committed Source Sans 3)
+        #[arg(long, value_name = "FILE")]
+        text_metrics: Option<PathBuf>,
+        /// The slim engine's web build (`sdk/wasm-visual` `pkg/web`), copied to `engine/` (see `moon run sdk-wasm-visual:build-web`)
+        #[arg(long, value_name = "DIR", conflicts_with = "data_only")]
+        engine: Option<PathBuf>,
+        /// Write the data without the renderer; the page then shows that it has no engine
+        #[arg(long)]
+        data_only: bool,
+    },
+    /// Suggest candidate anatomy parts from relationships, for human review (draft)
+    AnatomySuggest {
+        /// Components to suggest for; default is every component with relationships and no reviewed anatomy
+        #[arg(value_name = "COMPONENT")]
+        components: Vec<String>,
+        /// Output format
+        #[arg(long, default_value = "markdown", value_parser = ["markdown", "json"])]
+        format: String,
+        /// Directory containing cascade-format .tokens.json files
+        #[arg(long, value_name = "PATH")]
+        path: Option<PathBuf>,
+    },
+    /// Render a component from its visual recipe to SVG (draft)
+    Render {
+        /// Component name (e.g. action-button)
+        #[arg(value_name = "COMPONENT", required_unless_present = "batch")]
+        component: Option<String>,
+        /// Render every state of this JSON file (an array, or {"states": [...]}) with its own
+        /// component, size, states, options, colorScheme, scale, label, platform and id;
+        /// writes <id>.svg and <id>.scene.json per state plus index.json into --out
+        #[arg(long, value_name = "FILE", requires = "out", conflicts_with_all = ["output", "format"])]
+        batch: Option<PathBuf>,
+        /// Directory for --batch outputs
+        #[arg(long, value_name = "DIR", requires = "batch")]
+        out: Option<PathBuf>,
+        /// Size key from the recipe's sizeScale (xs, s, m, l, xl)
+        #[arg(long, default_value = "m")]
+        size: String,
+        /// Interaction state to apply (repeatable): hover, down, keyboard-focus
+        #[arg(long = "state", value_name = "STATE")]
+        states: Vec<String>,
+        /// Component option as name=value (repeatable); values parse as JSON when possible
+        #[arg(long = "option", value_name = "NAME=VALUE")]
+        options: Vec<String>,
+        /// Color scheme mode
+        #[arg(long, default_value = "light")]
+        color_scheme: String,
+        /// Scale mode
+        #[arg(long, default_value = "desktop")]
+        scale: String,
+        /// Label text for text parts
+        #[arg(long, default_value = "Label")]
+        label: String,
+        /// Demo width in px; replaces the recipe's root width (its minWidth still applies)
+        #[arg(long, value_name = "PX")]
+        width: Option<f64>,
+        /// Content icon: SET:NAME (e.g. workflow:edit) replaces it, `none` hides an optional one
+        #[arg(long, value_name = "SET:NAME|none")]
+        icon: Option<visual::IconOverride>,
+        /// Directory containing visual recipes (default: sibling `visuals/` of the tokens root)
+        #[arg(long, value_name = "DIR")]
+        visuals_path: Option<PathBuf>,
+        /// Directory containing cascade-format .tokens.json files
+        #[arg(long, value_name = "PATH")]
+        path: Option<PathBuf>,
+        /// Output format: `svg` or `scene` (resolved scene graph as JSON)
+        #[arg(long, default_value = "svg", value_parser = ["svg", "scene"])]
+        format: String,
+        /// Write output here instead of stdout
+        #[arg(long, short, value_name = "FILE")]
+        output: Option<PathBuf>,
+        /// Text-measurement table (advances and kerning per weight); default: committed Source Sans 3
+        #[arg(long, value_name = "FILE")]
+        text_metrics: Option<PathBuf>,
+    },
+    /// Compare scenes from `render --batch` with measured platform values (draft)
+    RenderCompare {
+        /// Directory of <id>.scene.json files (a `render --batch --out` directory)
+        #[arg(long, value_name = "DIR")]
+        scenes: PathBuf,
+        /// Measured-values JSON (format design-data-measured/1)
+        #[arg(long, value_name = "FILE")]
+        measured: PathBuf,
+        /// Override a tolerance as NAME=VALUE (repeatable): size, fontSize, fontWeight, color
+        #[arg(long = "tolerance", value_name = "NAME=VALUE")]
+        tolerances: Vec<String>,
+        /// Output format
+        #[arg(long, default_value = "json", value_parser = ["json", "markdown"])]
+        format: String,
+        /// Write output here instead of stdout
+        #[arg(long, short, value_name = "FILE")]
+        output: Option<PathBuf>,
+        /// Exit 1 when any value differs or a state has no scene
+        #[arg(long)]
+        fail_on_diff: bool,
+    },
+    /// Generate the spec-sheet model (draft) for a component: pages of blocks with scenes and token rows
+    SpecSheet {
+        /// Component name (e.g. action-button); components without a visual recipe get a table-only sheet
+        #[arg(value_name = "COMPONENT", required_unless_present = "all")]
+        component: Option<String>,
+        /// Generate a sheet for every component with relationships, plus index.json, into the --output directory
+        #[arg(long, conflicts_with_all = ["component", "changelog"])]
+        all: bool,
+        /// Size key the block visuals render at
+        #[arg(long, default_value = "m")]
+        size: String,
+        /// Changelog JSON whose entries mark blocks as changed
+        #[arg(long, value_name = "FILE")]
+        changelog: Option<PathBuf>,
+        /// With --all: directory of <component>.json changelogs (version and latest release in the index)
+        #[arg(long, value_name = "DIR", requires = "all")]
+        changelog_dir: Option<PathBuf>,
+        /// Directory containing cascade-format .tokens.json files
+        #[arg(long, value_name = "PATH")]
+        path: Option<PathBuf>,
+        /// Write output here instead of stdout (a directory with --all)
+        #[arg(long, short, value_name = "FILE")]
+        output: Option<PathBuf>,
+        /// Text-measurement table (advances and kerning per weight); default: committed Source Sans 3
+        #[arg(long, value_name = "FILE")]
+        text_metrics: Option<PathBuf>,
+        /// Also write each block's visual as an SVG string (render.svg) next to its scene.
+        /// Larger sheets and different hashes: leave it off for the Figma spec plugin
+        /// (45,000-character payloads, per-component hashes)
+        #[arg(long)]
+        svg: bool,
+    },
+    /// Append a release to each component's changelog (changelog/<component>.json) by diffing
+    /// two git revisions of the dataset
+    Changelog {
+        /// Revision the release starts after (tag, branch or commit)
+        #[arg(long, value_name = "REF")]
+        from: String,
+        /// Revision the release ends at
+        #[arg(long, value_name = "REF")]
+        to: String,
+        /// Only write this component's changelog
+        #[arg(long, value_name = "ID")]
+        component: Option<String>,
+        /// Dataset root (the directory holding tokens/, components/, ...); changelog/ is written inside it
+        #[arg(long, value_name = "PATH")]
+        dataset: Option<PathBuf>,
+        /// Release label recorded in the changelog (default: --to, without its package prefix)
+        #[arg(long, value_name = "LABEL")]
+        release: Option<String>,
+        /// Cut the range into one release per stable tag matching GLOB (backfill); commits after
+        /// the last tag are recorded under --release
+        #[arg(long, value_name = "GLOB")]
+        tags: Option<String>,
+    },
+    /// Resolve a token value for a given mode set context
+    Resolve {
+        /// Token property name to resolve (e.g. background-color-default)
+        #[arg(value_name = "PROPERTY")]
+        property: String,
+        /// Directory containing cascade-format .tokens.json files
+        #[arg(value_name = "PATH")]
+        path: Option<PathBuf>,
+        /// Directory containing spec-format mode set declaration JSON files
+        #[arg(long, value_name = "DIR")]
+        mode_sets_path: Option<PathBuf>,
+        /// Color scheme mode (e.g. light, dark, wireframe)
+        #[arg(long, value_name = "MODE")]
+        color_scheme: Option<String>,
+        /// Scale mode (e.g. desktop, mobile)
+        #[arg(long, value_name = "MODE")]
+        scale: Option<String>,
+        /// Contrast mode (e.g. regular, high)
+        #[arg(long, value_name = "MODE")]
+        contrast: Option<String>,
+        /// Output format: `pretty` (human-readable), `json` (raw resolved token
+        /// record), or `dtcg` (W3C Design Tokens Community Group `$value`/`$type`
+        /// document, for Style Dictionary/Terrazzo/etc. consumption)
+        #[arg(long, value_enum, default_value_t = ResolveFormat::Pretty)]
+        format: ResolveFormat,
+    },
+    /// Decompose a legacy kebab-case token slug into its structured name-object
+    /// fields (property/component/variant/state), verifying the roundtrip.
+    /// One-off exposure of `naming::parse_legacy_name`/`roundtrips` for external
+    /// importers (e.g. platform-manifest tooling) that need this without
+    /// reimplementing the algorithm.
+    DecomposeLegacyName {
+        /// Legacy slug to decompose (e.g. accent-background-color-default)
+        #[arg(value_name = "SLUG")]
+        slug: String,
+        /// Known component prefix, if any (mirrors the token's own "component" field)
+        #[arg(long, value_name = "NAME")]
+        component_hint: Option<String>,
+    },
+    /// Dump every token's computed legacy key (not deduped — one entry per
+    /// colorScheme/contrast member) as JSON. One-off exposure of
+    /// `naming::extract_legacy_key` (the same forward function that builds
+    /// `TokenGraph::legacy_name_index`) for external importers that need to
+    /// match an exact colorScheme/contrast member, which the deduped index
+    /// can't do (sdk/core/src/graph.rs:967-978).
+    DumpLegacyKeys {
+        /// Directory containing cascade-format .tokens.json files
+        #[arg(value_name = "PATH")]
+        path: Option<PathBuf>,
+    },
+    /// Compare two token datasets and report changes
+    Diff {
+        /// Directory containing the old/before token dataset
+        #[arg(value_name = "OLD")]
+        old: PathBuf,
+        /// Directory containing the new/after token dataset
+        #[arg(value_name = "NEW")]
+        new: PathBuf,
+        /// Output format
+        #[arg(long, value_enum, default_value_t = DiffFormat::Pretty)]
+        format: DiffFormat,
+        /// Filter to scope diff to matching tokens (query notation)
+        #[arg(long, value_name = "EXPR")]
+        filter: Option<String>,
+    },
+    /// Filter and list tokens matching a query expression
+    Query {
+        /// Path to token dataset directory
+        #[arg(value_name = "PATH")]
+        path: Option<PathBuf>,
+        /// Filter expression (e.g. "component=button,state=hover")
+        #[arg(long, value_name = "EXPR")]
+        filter: String,
+        /// Output format: `pretty`, `json` (raw matching records), or `dtcg` (resolved
+        /// cascade winner per matched property, as a merged W3C DTCG document)
+        #[arg(long, value_enum, default_value_t = QueryFormat::Pretty)]
+        format: QueryFormat,
+        /// Output only the match count
+        #[arg(long)]
+        count: bool,
+        /// Color scheme mode for `--format dtcg` resolution (e.g. light, dark, wireframe)
+        #[arg(long, value_name = "MODE")]
+        color_scheme: Option<String>,
+        /// Scale mode for `--format dtcg` resolution (e.g. desktop, mobile)
+        #[arg(long, value_name = "MODE")]
+        scale: Option<String>,
+        /// Contrast mode for `--format dtcg` resolution (e.g. regular, high)
+        #[arg(long, value_name = "MODE")]
+        contrast: Option<String>,
+    },
+    /// Export a whole resolved dataset as a single W3C DTCG document: every distinct
+    /// token property resolved to its cascade winner in the given mode context, merged
+    /// into one flat document (see `design_data_dtcg`). Reuses the same mode flags
+    /// and manifest handling as `resolve`; unlike `resolve`, it emits every property, not
+    /// one.
+    Export {
+        /// Directory containing cascade-format .tokens.json files
+        #[arg(value_name = "PATH")]
+        path: Option<PathBuf>,
+        /// Directory containing spec-format mode set declaration JSON files
+        #[arg(long, value_name = "DIR")]
+        mode_sets_path: Option<PathBuf>,
+        /// Color scheme mode (e.g. light, dark, wireframe)
+        #[arg(long, value_name = "MODE")]
+        color_scheme: Option<String>,
+        /// Scale mode (e.g. desktop, mobile)
+        #[arg(long, value_name = "MODE")]
+        scale: Option<String>,
+        /// Contrast mode (e.g. regular, high)
+        #[arg(long, value_name = "MODE")]
+        contrast: Option<String>,
+        /// Output format
+        #[arg(long, value_enum, default_value_t = ExportFormat::Dtcg)]
+        format: ExportFormat,
+    },
+    /// Snapshot and backward-compat verification helpers
+    Migrate {
+        #[command(subcommand)]
+        sub: MigrateSub,
+    },
+    /// Interact with Figma Variables REST API
+    Figma {
+        #[command(subcommand)]
+        sub: FigmaSub,
+    },
+    /// Emit a structural overview of the dataset for agent session start
+    Primer {
+        /// Path to the token dataset directory
+        #[arg(value_name = "PATH")]
+        path: Option<PathBuf>,
+        /// Output format
+        #[arg(long, value_enum, default_value_t = OutputFormat::Pretty)]
+        format: OutputFormat,
+        /// Override components directory
+        #[arg(long, value_name = "DIR")]
+        components_dir: Option<PathBuf>,
+        /// Override taxonomy fields directory
+        #[arg(long, value_name = "DIR")]
+        fields_dir: Option<PathBuf>,
+        /// Override mode sets directory
+        #[arg(long, value_name = "DIR")]
+        mode_sets_dir: Option<PathBuf>,
+    },
+    /// Return the full component declaration for a given component identifier
+    Component {
+        /// Component identifier (e.g. "button", "action-bar")
+        #[arg(value_name = "ID")]
+        id: String,
+        /// Override components directory
+        #[arg(long, value_name = "DIR")]
+        components_dir: Option<PathBuf>,
+    },
+    /// Export the component and guideline catalogs with the selected platform
+    /// manifest applied (`--platform`, `DESIGN_DATA_PLATFORM`, or `default_platform`)
+    Catalog {
+        #[command(subcommand)]
+        sub: CatalogSub,
+    },
+    /// Suggest existing tokens that match a natural-language intent string
+    Suggest {
+        /// Natural-language intent (e.g. "accent background hover")
+        #[arg(value_name = "INTENT")]
+        intent: String,
+        /// Path to the token dataset directory
+        #[arg(value_name = "PATH")]
+        path: Option<PathBuf>,
+        /// Restrict results to tokens whose name.property matches this hint
+        #[arg(long, value_name = "PROPERTY")]
+        property: Option<String>,
+        /// Maximum number of results to return
+        #[arg(long, default_value_t = 5)]
+        limit: usize,
+        /// Output format
+        #[arg(long, value_enum, default_value_t = OutputFormat::Pretty)]
+        format: OutputFormat,
+    },
+    /// Create or update a product-context.json document for a product-layer working copy
+    Write {
+        /// Path to the product context JSON file to create or update
+        #[arg(
+            short,
+            long,
+            value_name = "FILE",
+            default_value = "product-context.json"
+        )]
+        output: PathBuf,
+        /// Why this product-layer working copy exists (recorded in the document's rationale field)
+        #[arg(short, long, value_name = "TEXT")]
+        rationale: Option<String>,
+    },
+    /// Validate and write a product-layer token to a target file
+    #[command(group(ArgGroup::new("token_source").required(true).args(["token_json", "token_file"])))]
+    WriteToken {
+        /// Token key (its name in the target file, e.g. "checkout-background-color")
+        #[arg(value_name = "KEY")]
+        key: String,
+        /// Token object as a JSON string (must include $schema and value)
+        #[arg(long, value_name = "JSON", group = "token_source")]
+        token_json: Option<String>,
+        /// Path to a JSON file containing the token object
+        #[arg(long, value_name = "FILE", group = "token_source")]
+        token_file: Option<PathBuf>,
+        /// Target legacy JSON file to write to (created if absent, merged if present)
+        #[arg(long, value_name = "FILE")]
+        target: PathBuf,
+        /// Path to product-context.json for rationale capture (created if absent)
+        #[arg(long, value_name = "FILE")]
+        product_context: Option<PathBuf>,
+        /// Why this token was created or changed
+        #[arg(long, value_name = "TEXT")]
+        rationale: Option<String>,
+        /// Token overrides an existing foundation/platform token (records in overrides[])
+        #[arg(long)]
+        is_override: bool,
+        /// Path to schemas directory (default: packages/design-data-spec/schemas relative to target)
+        #[arg(long, value_name = "DIR")]
+        schema_path: Option<PathBuf>,
+    },
+    /// Build the derived embedded-database cache as a portable .redb asset
+    ///
+    /// Emits a single-file cache from the canonical JSON. Useful for shipping a
+    /// prebuilt index to WASM web tools, which open it read-only in memory.
+    #[command(name = "cache-build")]
+    CacheBuild {
+        /// Token dataset directory (default: resolved canonical dataset)
+        #[arg(value_name = "PATH")]
+        path: Option<PathBuf>,
+        /// Output .redb file path
+        #[arg(short, long, value_name = "FILE", default_value = "index.redb")]
+        output: PathBuf,
+        /// Mode sets catalog directory
+        #[arg(long, value_name = "DIR")]
+        mode_sets_path: Option<PathBuf>,
+        /// Components catalog directory
+        #[arg(long, value_name = "DIR")]
+        components_path: Option<PathBuf>,
+        /// Taxonomy fields catalog directory (baked into blob for primer() support)
+        #[arg(long, value_name = "DIR")]
+        fields_path: Option<PathBuf>,
+    },
+    /// Manage token authoring sessions (MCP parity, RFC #973 Q4)
+    #[command(name = "authoring-session")]
+    AuthoringSession {
+        #[command(subcommand)]
+        cmd: authoring::AuthoringSessionCommand,
+    },
+    /// Mutate already-committed cascade tokens by UUID (edit/deprecate/rename/rewire-alias/remove)
+    Lifecycle {
+        #[command(subcommand)]
+        cmd: lifecycle::LifecycleCommand,
+    },
+    /// Manage cascade dimension files (add-mode/rename-mode/remove-mode/create-mode-set/remove-mode-set)
+    #[command(name = "mode-set")]
+    ModeSet {
+        #[command(subcommand)]
+        cmd: lifecycle::ModeSetCommand,
+    },
+    /// Create or edit non-token data objects (components, fields, registry, mode-sets, guidelines)
+    Data {
+        #[command(subcommand)]
+        cmd: data::DataCommand,
+    },
+    /// Launch the interactive TUI (same as running with no arguments)
+    Tui(TuiArgs),
+}
+
+#[derive(Subcommand)]
+enum CatalogSub {
+    /// Write merged `components/`, `guidelines/` and `guidelines/manifest.json` under DIR
+    Export {
+        /// Output directory (created if missing)
+        #[arg(long, value_name = "DIR")]
+        out: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum PlatformSub {
+    /// List every configured platform-manifest entry (named `[platforms.<id>]`
+    /// profiles, plus the legacy single `manifest` key if present)
+    List {
+        /// Output format
+        #[arg(long, value_enum, default_value_t = OutputFormat::Pretty)]
+        format: OutputFormat,
+    },
+    /// Show details for one named `[platforms.<id>]` entry: resolved manifest
+    /// location (local path, or remote repo + pin), identity fields, and
+    /// foundation-version drift vs. this build (advisory only)
+    Show {
+        /// Platform id (as configured under `[platforms.<id>]`)
+        id: String,
+        /// Output format
+        #[arg(long, value_enum, default_value_t = OutputFormat::Pretty)]
+        format: OutputFormat,
+    },
+    /// Emit a standalone, publishable repo for a local `[platforms.<id>]` entry
+    /// (manifest.json, extensions/, README, LICENSE, `.design-data.toml` pinned
+    /// at the entry's `foundationVersion`, and a CI validation workflow), plus
+    /// printed `git subtree split` instructions for history-preserving
+    /// extraction — see `platforms/README.md`'s ejection contract and
+    /// `docs/MIGRATION.md` for the full runbook
+    Eject {
+        /// Platform id (must be a local `[platforms.<id>]` path entry — a
+        /// remote/`github`-sourced entry is already external and can't be
+        /// ejected from here)
+        id: String,
+        /// Output directory (default: `./<id>-design-data` in the CWD).
+        /// Rejected if it resolves inside the platform's own `extensions/`
+        /// dir, which would make the recursive copy walk into its own output.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Also write `.github/workflows/consumer-smoke.yml`, which runs the
+        /// repo's own `consumer/smoke.sh` (codegen + build) when present
+        #[arg(long)]
+        with_consumer_smoke: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum MigrateSub {
+    /// Run validation and compare to a golden snapshot JSON
+    Verify {
+        /// Token JSON file or directory (same as `validate`)
+        #[arg(value_name = "PATH")]
+        path: PathBuf,
+        /// Golden snapshot produced by `migrate snapshot`
+        #[arg(long, value_name = "FILE")]
+        snapshot: PathBuf,
+        #[arg(long, value_name = "DIR")]
+        schema_path: Option<PathBuf>,
+        #[arg(long, value_name = "FILE")]
+        exceptions_path: Option<PathBuf>,
+    },
+    /// Run validation and write a sorted snapshot JSON for CI / golden testing
+    Snapshot {
+        #[arg(value_name = "PATH")]
+        path: PathBuf,
+        #[arg(long, value_name = "FILE")]
+        output: PathBuf,
+        #[arg(long, value_name = "DIR")]
+        schema_path: Option<PathBuf>,
+        #[arg(long, value_name = "FILE")]
+        exceptions_path: Option<PathBuf>,
+    },
+    /// Convert legacy set-format token files to cascade-format .tokens.json files
+    Convert {
+        /// Source directory containing legacy token JSON files
+        #[arg(value_name = "INPUT")]
+        input: PathBuf,
+        /// Destination directory for cascade .tokens.json output files
+        #[arg(long, value_name = "OUTPUT")]
+        output: PathBuf,
+        /// Directory containing sidecar name-object JSON files (e.g. packages/token-names/names/)
+        #[arg(long, value_name = "DIR")]
+        names_dir: Option<PathBuf>,
+        /// Path to naming-exceptions.json for known non-roundtrippable token names
+        #[arg(long, value_name = "FILE")]
+        exceptions: Option<PathBuf>,
+    },
+    /// Convert cascade-format .tokens.json files back to legacy set-format JSON
+    LegacyOutput {
+        /// Source directory containing cascade .tokens.json files
+        #[arg(value_name = "INPUT")]
+        input: PathBuf,
+        /// Destination directory for legacy JSON output files
+        #[arg(long, value_name = "OUTPUT")]
+        output: PathBuf,
+    },
+    /// Convert a dataset, with its configured platform manifest cascade applied,
+    /// to a single legacy-format JSON snapshot (e.g. for tokentool
+    /// `generate-source-code --input`). Contrast-variant tokens are skipped —
+    /// `legacy::convert_array` groups sets by colorScheme/scale only, so a
+    /// contrast:high extension sharing a base token's colorScheme would
+    /// silently overwrite it (see bead spectrum-design-data-h890.17).
+    LegacyOutputCascaded {
+        /// Path to the token dataset directory (default: resolved canonical dataset)
+        #[arg(value_name = "PATH")]
+        path: Option<PathBuf>,
+        /// Destination file for the combined legacy-format JSON snapshot
+        #[arg(long, value_name = "FILE")]
+        output: PathBuf,
+    },
+    /// Add missing outer-level UUIDs to set tokens in legacy JSON files (in-place)
+    AddUuids {
+        /// Directory containing legacy .json token files to update
+        #[arg(value_name = "DIR")]
+        dir: PathBuf,
+    },
+    /// Verify that the legacy → cascade → legacy roundtrip is clean
+    RoundtripVerify {
+        /// Legacy source directory to roundtrip (e.g. packages/tokens/src)
+        #[arg(value_name = "PATH")]
+        path: PathBuf,
+    },
+    /// Verify that regenerating legacy output from cascade matches a reference legacy directory
+    LegacyVerify {
+        /// Source directory containing cascade .tokens.json files
+        #[arg(value_name = "CASCADE_DIR")]
+        cascade_dir: PathBuf,
+        /// Reference legacy directory to compare against (e.g. packages/tokens/src)
+        #[arg(long, value_name = "DIR")]
+        reference: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum FigmaSub {
+    /// Read existing variables from a Figma file
+    Read {
+        /// Figma file key (from the URL: figma.com/design/<file_key>/...)
+        #[arg(long)]
+        file_key: String,
+        /// Figma personal access token (or set FIGMA_TOKEN env var)
+        #[arg(long, env = "FIGMA_TOKEN", hide_env_values = true)]
+        token: String,
+        /// Output format (pretty or json)
+        #[arg(long, value_enum, default_value_t = OutputFormat::Pretty)]
+        format: OutputFormat,
+    },
+    /// Export design-data tokens as Figma Variables
+    Export {
+        /// Optional tokens root override. Defaults to the resolved design-data
+        /// dataset (`packages/design-data/tokens`, embedded, or configured
+        /// source). A directory of cascade `.tokens.json` files is loaded
+        /// natively; a legacy-format directory (e.g. `packages/tokens/src`) is
+        /// still accepted but deprecated.
+        #[arg(value_name = "PATH")]
+        path: Option<PathBuf>,
+        /// Figma file key to target
+        #[arg(long)]
+        file_key: String,
+        /// Figma personal access token (or set FIGMA_TOKEN env var)
+        #[arg(long, env = "FIGMA_TOKEN", hide_env_values = true)]
+        token: String,
+        /// Path to a name-mapping override artifact (from `figma audit`); overrides
+        /// take precedence over the default `{prefix}/{legacyKey}` naming
+        #[arg(long, value_name = "PATH")]
+        mapping: Option<PathBuf>,
+        /// Path to a platform manifest.json; when given, tokens are resolved
+        /// through the manifest cascade (include/exclude, overrides, extensions)
+        /// before export
+        #[arg(long, value_name = "PATH")]
+        manifest: Option<PathBuf>,
+        /// Add per-platform `codeSyntax` entries (shown in Figma Dev Mode) from
+        /// a platform manifest's `formatting` block, as `PLATFORM=PATH` (Figma
+        /// platform key, e.g. `ANDROID` or `iOS`, `=` a manifest.json path).
+        /// Repeatable. Independent of `--manifest` — this only reads
+        /// `formatting`, not the value cascade. `WEB` is rejected as a
+        /// platform key — its `codeSyntax` entry is already the authoritative
+        /// `--spectrum-{legacyKey}` name and a `formatting`-derived one would
+        /// only be lossier. Known limitation: for a
+        /// component-scoped token, `conceptOrder`/`abbreviations` entries for
+        /// `"component"` have no effect — the component prefix stays fused to
+        /// `property` and only casing/delimiter conversion applies.
+        #[arg(long = "code-syntax-manifest", value_name = "PLATFORM=PATH")]
+        code_syntax_manifests: Vec<String>,
+        /// Export a deprecated token that names a replacement (`renamed` /
+        /// `lifecycle.replacedBy`) as an alias to that replacement's variable
+        /// in every mode, instead of its own literal value. Follows
+        /// replacement chains. Changes the values Figma designs render for
+        /// those tokens — review with `figma diff` before writing. Deprecated
+        /// tokens without a usable replacement keep their literal value.
+        #[arg(long)]
+        redirect_deprecated: bool,
+        /// Also write a modeless alias layer into the existing "Spectrum"
+        /// collection: one variable per token, aliasing the mode-group variable
+        /// for tokens that vary on one axis, or holding the concrete value for
+        /// tokens that don't. Fails if the collection is missing. Off by
+        /// default; mode-group collections are unaffected either way.
+        #[arg(long)]
+        modeless_layer: bool,
+        /// Name variables by their bare token name instead of
+        /// `colorTheme/<name>` / `platformScale/<name>`. Only use this once the
+        /// target library's top-level folders are removed; otherwise every
+        /// variable is created anew. Off by default.
+        #[arg(long)]
+        no_folder_prefix: bool,
+        #[command(flatten)]
+        write_options: FigmaWriteOptions,
+    },
+    /// Import Figma Variable edits back into manifest `overrides` entries
+    Import {
+        /// Path to legacy token source directory
+        #[arg(value_name = "PATH")]
+        path: PathBuf,
+        /// Figma file key to read from
+        #[arg(long)]
+        file_key: String,
+        /// Figma personal access token (or set FIGMA_TOKEN env var)
+        #[arg(long, env = "FIGMA_TOKEN", hide_env_values = true)]
+        token: String,
+        /// Path to a platform manifest.json; tokens are resolved through the
+        /// manifest cascade so overrides target the same records `figma export` reads
+        #[arg(long, value_name = "PATH")]
+        manifest: PathBuf,
+        /// Path to a name-mapping override artifact (from `figma audit`); used
+        /// in reverse to invert renamed Figma variable names back to legacy keys
+        #[arg(long, value_name = "PATH")]
+        mapping: Option<PathBuf>,
+        /// Write the resulting overrides manifest here instead of stdout
+        #[arg(long, value_name = "PATH")]
+        out: Option<PathBuf>,
+    },
+    /// Audit generated Figma Variable names against a captured snapshot (offline, no API call)
+    Audit {
+        /// Path to a `figma read --format json` snapshot (a `VariablesMeta` JSON file)
+        #[arg(long)]
+        snapshot: PathBuf,
+        /// Optional tokens root override (cascade or legacy-format directory);
+        /// defaults to the resolved design-data dataset
+        #[arg(long)]
+        token_dir: Option<PathBuf>,
+        /// Compare against bare token names (as written by `figma export
+        /// --no-folder-prefix`) instead of `colorTheme/`/`platformScale/` names
+        #[arg(long)]
+        no_folder_prefix: bool,
+        /// Output format (pretty or json)
+        #[arg(long, value_enum, default_value_t = OutputFormat::Pretty)]
+        format: OutputFormat,
+    },
+    /// Compare the public variable names in a Figma file with the names generated from
+    /// design-data, and list hidden variables that need a public alias (offline)
+    PublicNames {
+        /// Path to a `variables/local` response or a `figma read --format json` snapshot
+        #[arg(long)]
+        snapshot: PathBuf,
+        /// Write the full report as CSV (one row per public variable and per hidden-only variable)
+        #[arg(long)]
+        csv: Option<PathBuf>,
+        /// Write a Markdown summary with examples per match class
+        #[arg(long)]
+        markdown: Option<PathBuf>,
+        /// Output format for stdout (pretty summary or the full JSON report)
+        #[arg(long, value_enum, default_value_t = OutputFormat::Pretty)]
+        format: OutputFormat,
+    },
+    /// Value-level diff between the manifest-resolved dataset and a Figma file (read-only)
+    Diff {
+        /// Figma file key to read from (required unless `--snapshot` is given)
+        #[arg(long)]
+        file_key: Option<String>,
+        /// Figma personal access token (or set FIGMA_TOKEN env var); required unless `--snapshot`
+        #[arg(long, env = "FIGMA_TOKEN", hide_env_values = true)]
+        token: Option<String>,
+        /// Diff offline against a captured `figma read --format json` snapshot instead of
+        /// calling the Figma API
+        #[arg(long, value_name = "PATH")]
+        snapshot: Option<PathBuf>,
+        /// Path to a name-mapping override artifact (from `figma audit`); overrides take
+        /// precedence over the default `{prefix}/{legacyKey}` naming
+        #[arg(long, value_name = "PATH")]
+        mapping: Option<PathBuf>,
+        /// Path to a platform manifest.json; when given, tokens are resolved through the
+        /// manifest cascade (include/exclude, overrides, extensions) instead of the default
+        /// resolved dataset
+        #[arg(long, value_name = "PATH")]
+        manifest: Option<PathBuf>,
+        /// Compare against bare token names (as written by `figma export
+        /// --no-folder-prefix`) instead of `colorTheme/`/`platformScale/` names
+        #[arg(long)]
+        no_folder_prefix: bool,
+        /// Output format (pretty or json)
+        #[arg(long, value_enum, default_value_t = OutputFormat::Pretty)]
+        format: OutputFormat,
+    },
+    /// Draft legacyKey -> figmaName override candidates for names `diff` can't
+    /// resolve, by matching resolved values instead (read-only; for review,
+    /// not applied automatically)
+    Pair {
+        /// Figma file key to read from (required unless `--snapshot` is given)
+        #[arg(long)]
+        file_key: Option<String>,
+        /// Figma personal access token (or set FIGMA_TOKEN env var); required unless `--snapshot`
+        #[arg(long, env = "FIGMA_TOKEN", hide_env_values = true)]
+        token: Option<String>,
+        /// Pair offline against a captured `figma read --format json` snapshot instead of
+        /// calling the Figma API
+        #[arg(long, value_name = "PATH")]
+        snapshot: Option<PathBuf>,
+        /// Path to an existing name-mapping override artifact (from `figma audit`); names
+        /// it already covers are skipped
+        #[arg(long, value_name = "PATH")]
+        mapping: Option<PathBuf>,
+        /// Path to a platform manifest.json; when given, tokens are resolved through the
+        /// manifest cascade instead of the default resolved dataset
+        #[arg(long, value_name = "PATH")]
+        manifest: Option<PathBuf>,
+        /// Output format (pretty or json)
+        #[arg(long, value_enum, default_value_t = OutputFormat::Pretty)]
+        format: OutputFormat,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum OutputFormat {
+    #[default]
+    Pretty,
+    Json,
+}
+
+/// Output format for the `diff` command (superset of `OutputFormat` — adds `markdown`).
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum DiffFormat {
+    #[default]
+    Pretty,
+    Json,
+    Markdown,
+}
+
+/// Output format for the `resolve` command (superset of `OutputFormat` — adds `dtcg`,
+/// a W3C DTCG-conformant `$value`/`$type`/`$description` document derived from the
+/// resolved token's leaf value; see `design_data_dtcg`).
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum ResolveFormat {
+    #[default]
+    Pretty,
+    Json,
+    Dtcg,
+}
+
+/// Output format for the `export` command.
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum ExportFormat {
+    #[default]
+    Dtcg,
+    Json,
+}
+
+/// Output format for the `query` command (superset of `OutputFormat` — adds `dtcg`,
+/// which resolves the cascade winner for each distinct property among the matched
+/// tokens and merges them into one W3C DTCG document; see `design_data_dtcg`).
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum QueryFormat {
+    #[default]
+    Pretty,
+    Json,
+    Dtcg,
+}
+
+/// The `--platform <id>` value from the top-level [`Cli`] flag (h890.27.4), set
+/// once in `main` before any command handler runs. Read by [`resolve_data_source`]
+/// so every call site picks it up automatically without threading it through 16+
+/// individual `CliPathOverrides` constructions. `DESIGN_DATA_PLATFORM` needs no
+/// equivalent — [`data_source::resolve`] already reads that env var directly.
+static GLOBAL_PLATFORM_ID: OnceLock<Option<String>> = OnceLock::new();
+
+/// Resolve `overrides` against the current working directory. Shared by every
+/// command handler so the config/probing/embedded-snapshot tiers in
+/// [`data_source::resolve`] are applied consistently everywhere.
+fn resolve_data_source(
+    mut overrides: CliPathOverrides,
+) -> miette::Result<data_source::ResolvedData> {
+    if overrides.platform_id.is_none() {
+        overrides.platform_id = GLOBAL_PLATFORM_ID.get().cloned().flatten();
+    }
+    let cwd = std::env::current_dir().into_diagnostic()?;
+    data_source::resolve(&cwd, &overrides).into_diagnostic()
+}
+
+fn load_exceptions(path: Option<&Path>) -> miette::Result<HashSet<String>> {
+    let Some(p) = path else {
+        // No path provided and not resolved — no exceptions file found.
+        return Ok(HashSet::new());
+    };
+    let file = NamingExceptionsFile::load(p)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("failed to load exceptions from {}", p.display()))?;
+    Ok(file.token_set())
+}
+
+/// `design-data decompose-legacy-name <slug>` — prints `{property, component?,
+/// variant?, state?, roundtrips}` as JSON. `roundtrips: false` means the parse
+/// is not trustworthy (the slug doesn't reproduce from the parsed fields) and
+/// callers should treat the slug as unresolved rather than use the fields.
+fn run_decompose_legacy_name(slug: &str, component_hint: Option<&str>) -> miette::Result<ExitCode> {
+    let parsed = naming::parse_legacy_name(slug, component_hint);
+    let roundtrips = naming::roundtrips(slug, component_hint);
+    let mut body = serde_json::to_value(&parsed).into_diagnostic()?;
+    body["roundtrips"] = serde_json::Value::Bool(roundtrips);
+    println!("{}", serde_json::to_string_pretty(&body).into_diagnostic()?);
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `design-data dump-legacy-keys [PATH]` — prints a JSON array of
+/// `{legacyKey, uuid, colorScheme?, contrast?, scale?}`, one entry per token
+/// (not deduped by legacyKey, unlike `TokenGraph::legacy_name_index`).
+/// `scale` disambiguates scale-set members (e.g. `font-size-100` has both a
+/// `mobile` and `desktop` uuid under the same legacy key) — see
+/// spectrum-design-data-h890.15.
+fn run_dump_legacy_keys(explicit_path: Option<&Path>) -> miette::Result<ExitCode> {
+    let resolved = resolve_data_source(CliPathOverrides {
+        tokens_root: explicit_path.map(Path::to_path_buf),
+        ..Default::default()
+    })?;
+    let path = &resolved.tokens_root;
+
+    let graph = TokenGraph::open_cached(path)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("failed to load tokens from {}", path.display()))?;
+
+    let mut out = Vec::new();
+    for rec in graph.tokens.values() {
+        let Some(name_val) = rec.raw.get("name") else {
+            continue;
+        };
+        let Some(legacy_key) = naming::extract_legacy_key(name_val) else {
+            continue;
+        };
+        let Some(uuid) = rec.uuid.clone() else {
+            continue;
+        };
+        let color_scheme = name_val.get("colorScheme").and_then(|v| v.as_str());
+        let contrast = name_val.get("contrast").and_then(|v| v.as_str());
+        let scale = name_val.get("scale").and_then(|v| v.as_str());
+        out.push(serde_json::json!({
+            "legacyKey": legacy_key,
+            "uuid": uuid,
+            "colorScheme": color_scheme,
+            "contrast": contrast,
+            "scale": scale,
+        }));
+    }
+    println!("{}", serde_json::to_string_pretty(&out).into_diagnostic()?);
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Resolve every distinct token in the dataset in `ctx` (see
+/// `cascade::resolve_dataset`), optionally restricted to the token identities in
+/// `only_identities` (as computed by `cascade::token_identity_key`). Shared by
+/// `export --format dtcg`/`--format json` and `query --format dtcg`.
+fn resolve_dataset_winners(
+    graph: &TokenGraph,
+    ctx: &ResolutionContext,
+    only_identities: Option<&HashSet<String>>,
+) -> Vec<TokenRecord> {
+    cascade::resolve_dataset(graph, ctx)
+        .into_iter()
+        .filter(|winner| {
+            let Some(only) = only_identities else {
+                return true;
+            };
+            winner
+                .raw
+                .get("name")
+                .and_then(|v| v.as_object())
+                .is_some_and(|n| only.contains(&cascade::token_identity_key(n, &graph.mode_sets)))
+        })
+        .collect()
+}
+
+/// Pure graph -> document exporters, looked up by `--format <id>`. Figma is
+/// deliberately not here — it's bidirectional/network-coupled, not a one-shot
+/// transform, so it keeps its own subcommands instead of this trait (see
+/// `design_data_core::export::TokenExporter`).
+fn exporters() -> Vec<Box<dyn TokenExporter>> {
+    vec![Box::new(dtcg::DtcgExporter)]
+}
+
+/// Merge each winner's single-key DTCG document into one flat DTCG document.
+fn winners_to_dtcg_doc(
+    graph: &TokenGraph,
+    winners: &[TokenRecord],
+    ctx: &HashMap<String, String>,
+) -> serde_json::Value {
+    exporters()
+        .into_iter()
+        .find(|e| e.format_id() == "dtcg")
+        .expect("dtcg exporter always registered")
+        .export(graph, winners, ctx)
+}
+
+/// Load the token graph (with relationships) and locate the `visuals/` directory.
+/// With `load_visuals`, the foundation recipes in that directory go into
+/// `graph.visuals` before the platform cascade, so a platform recipe replaces them.
+fn load_visual_env(
+    path: Option<PathBuf>,
+    visuals_path: Option<PathBuf>,
+    load_visuals: bool,
+) -> miette::Result<(TokenGraph, PathBuf, Option<manifest::PlatformIdentity>)> {
+    load_visual_env_for(path, visuals_path, load_visuals, None)
+}
+
+/// Like [`load_visual_env`], with `platform` overriding the global `--platform`.
+fn load_visual_env_for(
+    path: Option<PathBuf>,
+    visuals_path: Option<PathBuf>,
+    load_visuals: bool,
+    platform: Option<String>,
+) -> miette::Result<(TokenGraph, PathBuf, Option<manifest::PlatformIdentity>)> {
+    let resolved = resolve_data_source(CliPathOverrides {
+        tokens_root: path,
+        platform_id: platform,
+        ..Default::default()
+    })?;
+    let mut graph = TokenGraph::from_json_dir_with_catalogs(
+        &resolved.tokens_root,
+        resolved.mode_sets.as_deref(),
+        resolved.components.as_deref(),
+    )
+    .into_diagnostic()
+    .wrap_err("failed to load tokens")?;
+    if let Some(dir) = resolved.relationships.as_deref() {
+        let rels = TokenGraph::load_spec_relationships(dir)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("failed to load relationships from {}", dir.display()))?;
+        graph = graph.with_relationships(rels);
+    }
+    if let Some(dir) = resolved.icons.as_deref() {
+        let icons = TokenGraph::load_spec_icons(dir)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("failed to load icons from {}", dir.display()))?;
+        graph = graph.with_icons(icons);
+    }
+    let visuals_dir = visuals_path.unwrap_or_else(|| {
+        let sibling = |p: &Path| p.parent().map(|d| d.join("visuals"));
+        [
+            Some(resolved.tokens_root.join("visuals")),
+            sibling(&resolved.tokens_root),
+            resolved.components.as_deref().and_then(sibling),
+        ]
+        .into_iter()
+        .flatten()
+        .find(|d| d.is_dir())
+        .unwrap_or_else(|| PathBuf::from("visuals"))
+    });
+    if load_visuals && visuals_dir.is_dir() {
+        graph.visuals = TokenGraph::load_spec_visuals(&visuals_dir)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("failed to load recipes from {}", visuals_dir.display()))?;
+    }
+    // Foundation→Platform cascade, after the relationships and recipes load so
+    // extension relationships and recipes layer onto them. A no-op when no platform
+    // is selected.
+    manifest::apply_configured(&mut graph, &resolved)
+        .into_diagnostic()
+        .wrap_err("failed to apply platform manifest cascade")?;
+    let platform = manifest::platform_identity(&resolved).into_diagnostic()?;
+    Ok((graph, visuals_dir, platform))
+}
+
+/// Print candidate anatomy parts for review. Never writes component files.
+fn run_anatomy_suggest(
+    components: Vec<String>,
+    format: String,
+    path: Option<PathBuf>,
+) -> miette::Result<ExitCode> {
+    let (graph, _, _) = load_visual_env(path, None, false)?;
+    let suggestions = if components.is_empty() {
+        design_data_core::anatomy_suggest::suggest_all(&graph)
+    } else {
+        let mut out = Vec::new();
+        for c in &components {
+            out.push(
+                design_data_core::anatomy_suggest::suggest_component(&graph, c)
+                    .ok_or_else(|| miette::miette!("unknown component '{c}'"))?,
+            );
+        }
+        out
+    };
+    if format == "json" {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&suggestions).into_diagnostic()?
+        );
+    } else {
+        print!(
+            "{}",
+            design_data_core::anatomy_suggest::to_markdown(&suggestions)
+        );
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Write a static, server-free component explorer (see `design-data-site`).
+fn run_site(
+    out: PathBuf,
+    components: Vec<String>,
+    path: Option<PathBuf>,
+    visuals_path: Option<PathBuf>,
+    text_metrics: Option<PathBuf>,
+    engine: Option<PathBuf>,
+    data_only: bool,
+) -> miette::Result<ExitCode> {
+    if engine.is_none() && !data_only {
+        miette::bail!(
+            "the site needs the slim engine: build it with `moon run sdk-wasm-visual:build-web` and pass \
+             `--engine sdk/wasm-visual/pkg/web` (or `--data-only` to write the data without a renderer)"
+        );
+    }
+    // Validate the file, then ship its text as is so the site measures what the CLI does.
+    let table = match &text_metrics {
+        Some(p) => {
+            load_text_metrics(Some(p))?;
+            Some(std::fs::read_to_string(p).into_diagnostic()?)
+        }
+        None => None,
+    };
+    let (graph, _, platform) = load_visual_env(path, visuals_path, true)?;
+    let count = design_data_site::write_site(
+        &graph,
+        &components,
+        &out,
+        platform.as_ref(),
+        table.as_deref(),
+        engine.as_deref(),
+    )
+    .map_err(|e| miette::miette!("{e}"))?;
+    eprintln!("Wrote site for {count} component(s) to {}", out.display());
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Read and validate a `--text-metrics` file; `None` keeps the committed default table.
+fn load_text_metrics(path: Option<&Path>) -> miette::Result<Option<TextMetrics>> {
+    let Some(p) = path else { return Ok(None) };
+    let text = std::fs::read_to_string(p)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("failed to read --text-metrics {}", p.display()))?;
+    TextMetrics::parse(&text)
+        .map(Some)
+        .map_err(|e| miette::miette!("--text-metrics {}: {e}", p.display()))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_render(
+    component: Option<String>,
+    batch: Option<PathBuf>,
+    out: Option<PathBuf>,
+    size: String,
+    states: Vec<String>,
+    options: Vec<String>,
+    color_scheme: String,
+    scale: String,
+    label: String,
+    width: Option<f64>,
+    icon: Option<visual::IconOverride>,
+    visuals_path: Option<PathBuf>,
+    path: Option<PathBuf>,
+    format: String,
+    output: Option<PathBuf>,
+    text_metrics: Option<PathBuf>,
+) -> miette::Result<ExitCode> {
+    let text_metrics = load_text_metrics(text_metrics.as_deref())?;
+    if let (Some(file), Some(dir)) = (&batch, &out) {
+        return render_batch::run_batch(file, dir, visuals_path, path, text_metrics);
+    }
+    let component = component.expect("clap requires COMPONENT without --batch");
+    let (graph, visuals_dir, platform) = load_visual_env(path, visuals_path, true)?;
+    let recipe = &graph
+        .visual_recipe(&component)
+        .ok_or_else(|| {
+            miette::miette!(
+                "no visual recipe for '{component}' in {} or the platform's extensions/visuals",
+                visuals_dir.display()
+            )
+        })?
+        .raw;
+    let component = graph.canonical_component(&component).to_string();
+
+    let mut opts = HashMap::new();
+    for o in options {
+        let (k, v) = o
+            .split_once('=')
+            .ok_or_else(|| miette::miette!("--option expects NAME=VALUE, got '{o}'"))?;
+        let val = serde_json::from_str(v).unwrap_or_else(|_| serde_json::Value::String(v.into()));
+        opts.insert(k.to_string(), val);
+    }
+    let req = visual::RenderRequest {
+        component,
+        size,
+        states,
+        options: opts,
+        mode: HashMap::from([
+            ("colorScheme".to_string(), color_scheme),
+            ("scale".to_string(), scale),
+        ]),
+        label,
+        icon,
+        text_metrics,
+        width,
+    };
+    let scene = visual::build_scene(&graph, recipe, &req).map_err(|e| miette::miette!(e))?;
+    for d in &scene.diagnostics {
+        match &platform {
+            Some(p) => eprintln!("warning: platform '{}': {d}", p.id),
+            None => eprintln!("warning: {d}"),
+        }
+    }
+    let svg = if format == "scene" {
+        serde_json::to_string_pretty(&scene).into_diagnostic()?
+    } else {
+        visual::scene_to_svg(&scene)
+    };
+    match output {
+        Some(p) => std::fs::write(&p, svg)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("failed to write {}", p.display()))?,
+        None => println!("{svg}"),
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_resolve(
+    property: &str,
+    explicit_path: Option<&Path>,
+    mode_sets_path: Option<PathBuf>,
+    color_scheme: Option<String>,
+    scale: Option<String>,
+    contrast: Option<String>,
+    format: ResolveFormat,
+) -> miette::Result<ExitCode> {
+    // Build resolution context from flags.
+    let mut resolve_ctx = ResolutionContext::new();
+    if let Some(m) = color_scheme {
+        resolve_ctx = resolve_ctx.with("colorScheme", m);
+    }
+    if let Some(m) = scale {
+        resolve_ctx = resolve_ctx.with("scale", m);
+    }
+    if let Some(m) = contrast {
+        resolve_ctx = resolve_ctx.with("contrast", m);
+    }
+
+    // Resolve catalog paths first so the cache can hydrate them on hit.
+    let resolved = resolve_data_source(CliPathOverrides {
+        tokens_root: explicit_path.map(Path::to_path_buf),
+        mode_sets: mode_sets_path,
+        ..Default::default()
+    })?;
+    let path = &resolved.tokens_root;
+
+    // Load token graph (via the embedded-database cache when fresh).
+    let mut graph = TokenGraph::open_cached_with_catalogs(
+        path,
+        resolved.mode_sets.as_deref(),
+        resolved.components.as_deref(),
+    )
+    .into_diagnostic()
+    .wrap_err_with(|| format!("failed to load tokens from {}", path.display()))?;
+
+    // Apply a configured platform manifest (Foundation→Platform cascade): filter the
+    // token set, layer in overrides/extensions, and capture mode-set restrictions.
+    let restrictions = manifest::apply_configured(&mut graph, &resolved)
+        .into_diagnostic()
+        .wrap_err("failed to apply platform manifest cascade")?;
+
+    for (mode_set, allowed) in &restrictions {
+        resolve_ctx = resolve_ctx.with_restriction(mode_set.clone(), allowed.clone());
+    }
+
+    let candidates = resolve_property(&graph, property, &resolve_ctx);
+
+    if candidates.is_empty() {
+        eprintln!("No tokens found with property: {property}");
+        return Ok(ExitCode::from(1));
+    }
+
+    match candidates.iter().find(|c| c.is_winner) {
+        None => {
+            eprintln!("No matching token for property '{property}' in given context");
+            Ok(ExitCode::from(1))
+        }
+        Some(winner) => {
+            let winner = &winner.record;
+            match format {
+                ResolveFormat::Json => {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&winner.raw).into_diagnostic()?
+                    );
+                }
+                ResolveFormat::Dtcg => {
+                    let doc = dtcg::token_to_dtcg_document(&graph, winner);
+                    println!("{}", serde_json::to_string_pretty(&doc).into_diagnostic()?);
+                }
+                ResolveFormat::Pretty => {
+                    println!("Property:  {property}");
+                    if let Some(val) = winner.raw.get("value") {
+                        println!("Value:     {val}");
+                    } else if let Some(r) = winner.raw.get("$ref") {
+                        println!("Alias:     {r}");
+                    }
+                    println!("File:      {}", winner.file.display());
+                    println!("Index:     {}", winner.index);
+                    if let Some(uuid) = &winner.uuid {
+                        println!("UUID:      {uuid}");
+                    }
+                }
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+    }
+}
+
+struct ValidateOpts {
+    format: OutputFormat,
+    schema_path: Option<PathBuf>,
+    exceptions_path: Option<PathBuf>,
+    mode_sets_path: Option<PathBuf>,
+    components_path: Option<PathBuf>,
+    relationships_path: Option<PathBuf>,
+    visuals_path: Option<PathBuf>,
+    icons_path: Option<PathBuf>,
+    names_dir: Option<PathBuf>,
+    components_report_only: bool,
+    strict: bool,
+}
+
+fn run_validate(explicit_path: Option<&Path>, opts: ValidateOpts) -> miette::Result<ExitCode> {
+    if !validate::engine_ready() {
+        miette::bail!("validation engine not ready");
+    }
+    let resolved = resolve_data_source(CliPathOverrides {
+        tokens_root: explicit_path.map(Path::to_path_buf),
+        schema_root: opts.schema_path,
+        exceptions: opts.exceptions_path,
+        mode_sets: opts.mode_sets_path,
+        components: opts.components_path,
+        relationships: opts.relationships_path,
+        icons: opts.icons_path,
+        ..Default::default()
+    })?;
+    let path = &resolved.tokens_root;
+    // A selected platform (`--platform`, DESIGN_DATA_PLATFORM, default_platform) lets SPEC-076
+    // check that recipe bindings still resolve once its manifest is applied.
+    let platform_manifest = manifest::load_configured_manifest(&resolved)
+        .into_diagnostic()
+        .wrap_err("failed to load platform manifest")?;
+
+    let schema_root = resolved.schemas_root;
+    let registry = SchemaRegistry::load_legacy_token_schemas(&schema_root)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("failed to load schemas from {}", schema_root.display()))?;
+    let exceptions = load_exceptions(resolved.exceptions.as_deref())?;
+
+    let dims_dir = resolved.mode_sets;
+    let comps_dir = resolved.components;
+    let relationships_dir = resolved.relationships;
+
+    let mut report = validate::validate_all_with_platform(
+        path,
+        &registry,
+        &exceptions,
+        dims_dir.as_deref(),
+        comps_dir.as_deref(),
+        opts.names_dir.as_deref(),
+        None,
+        relationships_dir.as_deref(),
+        opts.visuals_path.as_deref(),
+        resolved.icons.as_deref(),
+        platform_manifest,
+    )
+    .into_diagnostic()
+    .wrap_err("validation failed")?;
+
+    if opts.components_report_only {
+        let ids: std::collections::HashSet<&str> = validate::rules::COMPONENT_RULE_IDS
+            .iter()
+            .copied()
+            .collect();
+        report.downgrade_rules(&ids);
+    }
+
+    match opts.format {
+        OutputFormat::Json => {
+            println!("{}", format::format_report_json(&report).into_diagnostic()?);
+        }
+        OutputFormat::Pretty => {
+            format::print_report_pretty(&report);
+        }
+    }
+
+    if report.failed(opts.strict) {
+        return Ok(ExitCode::from(1));
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+struct ValidateDatasetOpts {
+    format: OutputFormat,
+    schema_path: Option<PathBuf>,
+    spec_schemas: Option<PathBuf>,
+    exceptions_path: Option<PathBuf>,
+    strict: bool,
+}
+
+/// Locate the design-data-spec schemas directory: explicit flag, then probe
+/// common in-repo locations relative to the dataset root and the cwd.
+fn resolve_spec_schemas(
+    explicit: Option<PathBuf>,
+    dataset_root: &Path,
+    cwd: &Path,
+) -> Option<PathBuf> {
+    if let Some(p) = explicit {
+        return p.is_dir().then_some(p);
+    }
+    let candidates = [
+        dataset_root.join("../design-data-spec/schemas"),
+        cwd.join("packages/design-data-spec/schemas"),
+        cwd.join("../packages/design-data-spec/schemas"),
+        cwd.join("../design-data-spec/schemas"),
+    ];
+    candidates
+        .into_iter()
+        .find(|c| c.join("field.schema.json").is_file())
+}
+
+/// Validate a whole dataset directory: SPEC-044 structure pre-check, token rules,
+/// and Layer 1 schema-shape validation of the registered catalog directories.
+///
+/// NOTE: token-schema and naming-exceptions paths are resolved relative to the
+/// current working directory (via [`data_source::resolve`]), NOT relative to
+/// `path`. This is intentional for the in-repo workflow (the only current use
+/// case): the legacy `token-types/` schemas and `naming-exceptions.json` live in
+/// the checkout, not inside an arbitrary target dataset. The dataset's own
+/// catalog directories (`fields/`, `components/`, `mode-sets/`, `registry/`) and
+/// the SPEC-044 structure check ARE resolved relative to `path`. Pass
+/// `--schema-path` / `--exceptions-path` / `--spec-schemas` to override when
+/// validating a dataset outside the current checkout.
+fn run_validate_dataset(path: &Path, opts: ValidateDatasetOpts) -> miette::Result<ExitCode> {
+    if !validate::engine_ready() {
+        miette::bail!("validation engine not ready");
+    }
+    let cwd = std::env::current_dir().into_diagnostic()?;
+    let resolved = resolve_data_source(CliPathOverrides {
+        schema_root: opts.schema_path,
+        exceptions: opts.exceptions_path,
+        ..Default::default()
+    })?;
+
+    let schema_root = resolved.schemas_root;
+    let registry = SchemaRegistry::load_legacy_token_schemas(&schema_root)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("failed to load schemas from {}", schema_root.display()))?;
+    let exceptions = load_exceptions(resolved.exceptions.as_deref())?;
+
+    let dataset_root = validate::dataset_structure::resolve_dataset_root(path);
+
+    // Token validation runs with the same relational scope as `validate` (no
+    // catalogs fed into the graph); the registered catalog directories are
+    // checked structurally below via Layer 1 schema validation. This keeps
+    // dataset validation additive and avoids surfacing unrelated relational
+    // drift (e.g. SPEC-018 component association) that is out of scope here.
+    //
+    // One consequence: SPEC-047's declared-anatomy-part arm can't be
+    // evaluated without a component catalog, so it defers rather than
+    // flagging component-scoped gap endpoints (see spec047.rs). Only the
+    // full `validate` subcommand — which does load components — enforces
+    // that arm.
+    let mut report =
+        validate::validate_dataset(&dataset_root, &registry, &exceptions, None, None, None)
+            .into_diagnostic()
+            .wrap_err("validation failed")?;
+
+    // Layer 1 schema-shape validation of the registered catalog directories.
+    match resolve_spec_schemas(opts.spec_schemas, &dataset_root, &cwd) {
+        Some(spec_dir) => {
+            validate::validate_catalog_schemas(&mut report, &dataset_root, &spec_dir)
+                .into_diagnostic()?;
+        }
+        None => {
+            eprintln!(
+                "design-data: warning: design-data-spec schemas not found; \
+                 skipping fields/components/mode-sets/registry schema validation \
+                 (pass --spec-schemas <DIR> to enable)"
+            );
+        }
+    }
+
+    report.recompute_valid();
+
+    match opts.format {
+        OutputFormat::Json => {
+            println!("{}", format::format_report_json(&report).into_diagnostic()?);
+        }
+        OutputFormat::Pretty => {
+            format::print_report_pretty(&report);
+        }
+    }
+
+    if report.failed(opts.strict) {
+        return Ok(ExitCode::from(1));
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `design-data validate-manifest [PATH] [--manifest FILE] [--format]` — validate the
+/// configured Layer 2 platform manifest directly, without running a query. Loads the
+/// foundation token graph and runs the same cascade `manifest::apply_configured` applies
+/// during `query`/`resolve`/`convert`: Layer 1 schema-shape validation plus apply-time
+/// Describe one `[platforms.<id>]` entry as `(location, detail)` for
+/// `platform list`/`show` (h890.27.6): `location` is `"local"` or `"remote"`;
+/// `detail` is a human-readable path, or `repo@pin (manifest_path)`.
+fn describe_platform_entry(entry: &data_source::PlatformManifestEntry) -> (&'static str, String) {
+    match entry {
+        data_source::PlatformManifestEntry::Path(path) => ("local", path.display().to_string()),
+        data_source::PlatformManifestEntry::Remote {
+            repo,
+            tag,
+            branch,
+            sha,
+            manifest_path,
+        } => {
+            let pin = tag
+                .as_deref()
+                .map(|t| format!("tag:{t}"))
+                .or_else(|| branch.as_deref().map(|b| format!("branch:{b}")))
+                .or_else(|| sha.as_deref().map(|s| format!("sha:{s}")))
+                .unwrap_or_else(|| "unpinned".to_string());
+            let manifest_path = manifest_path
+                .clone()
+                .unwrap_or_else(|| PathBuf::from("manifest.json"));
+            (
+                "remote",
+                format!("{repo}@{pin} ({})", manifest_path.display()),
+            )
+        }
+    }
+}
+
+/// `design-data platform list` (h890.27.6): enumerate every configured
+/// `[platforms.<id>]` entry (or the legacy single `manifest` key, if that's all
+/// a repo has), marking which one `default_platform` selects.
+fn run_platform_list(format: OutputFormat) -> miette::Result<ExitCode> {
+    let cwd = std::env::current_dir().into_diagnostic()?;
+    let found = data_source::find_config(&cwd).into_diagnostic()?;
+
+    let mut rows: Vec<(String, &'static str, String, bool)> = Vec::new();
+    if let Some((_, config)) = &found {
+        if let Some(platforms) = &config.platforms {
+            let mut ids: Vec<String> = platforms.keys().cloned().collect();
+            ids.sort();
+            for id in ids {
+                let entry = &platforms[&id];
+                let (location, detail) = describe_platform_entry(entry);
+                let is_default = config.default_platform.as_deref() == Some(id.as_str());
+                rows.push((id, location, detail, is_default));
+            }
+        } else if let Some(manifest) = &config.manifest {
+            rows.push((
+                "(default)".to_string(),
+                "local",
+                manifest.display().to_string(),
+                true,
+            ));
+        }
+    }
+
+    match format {
+        OutputFormat::Json => {
+            let json: Vec<_> = rows
+                .iter()
+                .map(|(id, location, detail, is_default)| {
+                    serde_json::json!({
+                        "id": id,
+                        "location": location,
+                        "detail": detail,
+                        "default": is_default,
+                    })
+                })
+                .collect();
+            println!("{}", serde_json::to_string(&json).into_diagnostic()?);
+        }
+        OutputFormat::Pretty => {
+            if rows.is_empty() {
+                println!("design-data: no platform manifests configured");
+            } else {
+                for (id, location, detail, is_default) in &rows {
+                    let marker = if *is_default { "*" } else { " " };
+                    println!("{marker} {id:<20} {location:<8} {detail}");
+                }
+            }
+        }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `design-data platform show <id>` (h890.27.6): resolve one named platform
+/// entry (fetching it if remote), and report its location, identity fields,
+/// and an advisory `foundationVersion`-vs-this-build drift check.
+fn run_platform_show(id: &str, format: OutputFormat) -> miette::Result<ExitCode> {
+    let resolved = resolve_data_source(CliPathOverrides {
+        platform_id: Some(id.to_string()),
+        ..Default::default()
+    })?;
+    let Some(manifest_path) = resolved.platform_manifest.clone() else {
+        eprintln!("design-data: error: platform \"{id}\" resolved but has no manifest path");
+        return Ok(ExitCode::from(2));
+    };
+
+    let manifest_json: Option<serde_json::Value> = std::fs::read_to_string(&manifest_path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok());
+    let str_field = |key: &str| {
+        manifest_json
+            .as_ref()
+            .and_then(|m| m.get(key))
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+    };
+    let platform = str_field("platform");
+    let platform_version = str_field("platformVersion");
+    let repository = str_field("repository");
+    let foundation_version = str_field("foundationVersion");
+    let drift = foundation_version.as_deref().map(|fv| {
+        let version = fv.rsplit_once('@').map_or(fv, |(_, v)| v);
+        if version == data_source::EMBEDDED_DATA_VERSION {
+            format!("in sync (matches this build's embedded foundation {fv})")
+        } else {
+            format!(
+                "manifest declares foundationVersion \"{fv}\"; this build's embedded \
+                 foundation is \"{}\" — may be drifted",
+                data_source::EMBEDDED_DATA_VERSION
+            )
+        }
+    });
+
+    let cwd = std::env::current_dir().into_diagnostic()?;
+    let entry_detail = data_source::find_config(&cwd)
+        .into_diagnostic()?
+        .and_then(|(_, config)| config.platforms)
+        .and_then(|platforms| platforms.get(id).map(describe_platform_entry));
+
+    match format {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "id": id,
+                    "manifest": manifest_path.display().to_string(),
+                    "location": entry_detail.as_ref().map(|(l, _)| *l),
+                    "detail": entry_detail.as_ref().map(|(_, d)| d.clone()),
+                    "platform": platform,
+                    "platformVersion": platform_version,
+                    "repository": repository,
+                    "foundationVersion": foundation_version,
+                    "drift": drift,
+                })
+            );
+        }
+        OutputFormat::Pretty => {
+            println!("design-data: platform \"{id}\"");
+            println!("  manifest:  {}", manifest_path.display());
+            if let Some((location, detail)) = &entry_detail {
+                println!("  source:    {location} — {detail}");
+            }
+            if let Some(p) = &platform {
+                println!("  platform:  {p}");
+            }
+            if let Some(v) = &platform_version {
+                println!("  version:   {v}");
+            }
+            if let Some(r) = &repository {
+                println!("  repository:{r}");
+            }
+            if let Some(d) = &drift {
+                println!("  foundation: {d}");
+            }
+        }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Lexically absolutize and normalize a path (join with cwd if relative,
+/// then collapse `.`/`..` components) without touching the filesystem or
+/// resolving symlinks, so two paths — one of which may not exist yet, like an
+/// eject `--out` dir — can be compared for containment. `std::path::absolute`
+/// alone isn't enough: it leaves `..` components in place, which would let a
+/// crafted `--out` path (e.g. `platforms/x/extensions/../../../out`) dodge a
+/// naive `starts_with` check.
+fn absolutize(path: &Path) -> std::io::Result<PathBuf> {
+    use std::path::Component;
+    let absolute = std::path::absolute(path)?;
+    let mut normalized = PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::CurDir => {}
+            other => normalized.push(other),
+        }
+    }
+    Ok(normalized)
+}
+
+/// Resolve `path` (lexically absolutized/normalized via [`absolutize`]) as
+/// close to a true canonical path as possible without requiring it to exist:
+/// canonicalizes the nearest existing ancestor (resolving any symlinks in
+/// it — e.g. macOS's `/tmp` -> `/private/tmp`) and re-joins the remaining,
+/// not-yet-created path segments onto that. Needed because a config-derived
+/// path (resolved from `std::env::current_dir()`, which most OSes already
+/// report fully resolved) and a literal, unresolved CLI `--out` argument can
+/// otherwise disagree on containment purely due to a symlinked ancestor.
+fn resolve_as_far_as_possible(path: &Path) -> std::io::Result<PathBuf> {
+    let lexical = absolutize(path)?;
+    for ancestor in lexical.ancestors() {
+        if ancestor.exists() {
+            let canonical_ancestor = ancestor.canonicalize()?;
+            let suffix = lexical
+                .strip_prefix(ancestor)
+                .expect("ancestor is a prefix of lexical by construction");
+            return Ok(canonical_ancestor.join(suffix));
+        }
+    }
+    // No ancestor exists (e.g. an absolute root that isn't mounted) — fall
+    // back to the lexical form.
+    Ok(lexical)
+}
+
+/// True if `candidate` is `ancestor` itself or nested anywhere under it,
+/// resolved via [`resolve_as_far_as_possible`] so this works even when
+/// `candidate` doesn't exist on disk yet (e.g. an eject `--out` dir) and even
+/// when a symlinked ancestor (e.g. macOS's `/tmp`) would otherwise make a
+/// purely lexical comparison disagree.
+fn path_is_within(ancestor: &Path, candidate: &Path) -> std::io::Result<bool> {
+    let ancestor = resolve_as_far_as_possible(ancestor)?;
+    let candidate = resolve_as_far_as_possible(candidate)?;
+    Ok(candidate.starts_with(&ancestor))
+}
+
+/// Recursively copy a directory tree (used by `platform eject` to duplicate a
+/// platform's `extensions/` dir into the ejected repo). Creates `dst` and any
+/// nested subdirectories as needed.
+fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let dst_path = dst.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_dir_all(&entry.path(), &dst_path)?;
+        } else {
+            std::fs::copy(entry.path(), &dst_path)?;
+        }
+    }
+    Ok(())
+}
+
+/// `design-data platform eject <id>` (h890.27.11): package a local
+/// `[platforms.<id>]` entry as a standalone, publishable repo — the first half
+/// of the incubate-here → team-owned-repo migration path (`platforms/README.md`).
+/// Does not touch git history; pair with the printed `git subtree split`
+/// instructions to preserve it.
+fn run_platform_eject(
+    id: &str,
+    out: Option<PathBuf>,
+    with_consumer_smoke: bool,
+) -> miette::Result<ExitCode> {
+    let cwd = std::env::current_dir().into_diagnostic()?;
+    let Some((config_path, config)) = data_source::find_config(&cwd).into_diagnostic()? else {
+        eprintln!(
+            "design-data: error: no `.design-data.toml` found from {}",
+            cwd.display()
+        );
+        return Ok(ExitCode::from(2));
+    };
+    let config_dir = config_path
+        .parent()
+        .expect("config file path always has a parent")
+        .to_path_buf();
+
+    let entry = config.platforms.as_ref().and_then(|p| p.get(id));
+    let manifest_path = match entry {
+        Some(data_source::PlatformManifestEntry::Path(path)) => {
+            if path.is_absolute() {
+                path.clone()
+            } else {
+                config_dir.join(path)
+            }
+        }
+        Some(data_source::PlatformManifestEntry::Remote { .. }) => {
+            eprintln!(
+                "design-data: error: platform \"{id}\" is a remote entry — it's already \
+                 external and has nothing to eject; point consumers at its `repo`/`tag` \
+                 directly instead"
+            );
+            return Ok(ExitCode::from(2));
+        }
+        None => {
+            let available = config
+                .platforms
+                .as_ref()
+                .map(|p| {
+                    let mut ids: Vec<String> = p.keys().cloned().collect();
+                    ids.sort();
+                    ids
+                })
+                .unwrap_or_default();
+            eprintln!(
+                "design-data: error: unknown platform id \"{id}\" — configured ids: {}",
+                if available.is_empty() {
+                    "(none)".to_string()
+                } else {
+                    available.join(", ")
+                }
+            );
+            return Ok(ExitCode::from(2));
+        }
+    };
+    let Some(platform_dir) = manifest_path.parent() else {
+        eprintln!(
+            "design-data: error: manifest path {} has no parent directory",
+            manifest_path.display()
+        );
+        return Ok(ExitCode::from(2));
+    };
+
+    let manifest_text = std::fs::read_to_string(&manifest_path)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("failed to read {}", manifest_path.display()))?;
+    let manifest_json: serde_json::Value =
+        serde_json::from_str(&manifest_text)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("failed to parse {}", manifest_path.display()))?;
+    let foundation_version = manifest_json
+        .get("foundationVersion")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+
+    let out_dir = out.unwrap_or_else(|| PathBuf::from(format!("{id}-design-data")));
+
+    // Reject an --out nested inside (or equal to) the platform's `extensions/`
+    // dir *before* creating it. `copy_dir_all` below walks `extensions_src`
+    // recursively; if `out_dir` (and the `extensions/` it creates inside
+    // itself) lives inside that same tree, the walk would encounter its own
+    // in-progress destination and recurse until the OS refuses
+    // (ELOOP/too-many-open-files) or disk fills up. The reverse nesting
+    // (extensions/ living inside --out) is harmless — the destination
+    // subtree is a distinct path — so only this direction is rejected.
+    let extensions_src = platform_dir.join("extensions");
+    if extensions_src.is_dir() && path_is_within(&extensions_src, &out_dir).into_diagnostic()? {
+        eprintln!(
+            "design-data: error: --out {} is inside platform \"{id}\"'s extensions/ dir \
+             ({}) — choose an output path outside it",
+            out_dir.display(),
+            extensions_src.display()
+        );
+        return Ok(ExitCode::from(2));
+    }
+
+    std::fs::create_dir_all(&out_dir)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("failed to create {}", out_dir.display()))?;
+
+    // manifest.json — verbatim; the on-disk Layer 2 manifest never carries an
+    // inline `extensions` object (that's glob+merged from the sibling
+    // `extensions/` dir at apply time), so no rewriting is needed.
+    std::fs::copy(&manifest_path, out_dir.join("manifest.json"))
+        .into_diagnostic()
+        .wrap_err("failed to copy manifest.json")?;
+
+    // extensions/ — copied verbatim if present; a platform with no overlay
+    // content yet (e.g. seeded-but-empty) simply has nothing to copy.
+    if extensions_src.is_dir() {
+        copy_dir_all(&extensions_src, &out_dir.join("extensions"))
+            .into_diagnostic()
+            .wrap_err("failed to copy extensions/")?;
+    }
+
+    // README.md — copy the in-repo one if present (it documents this
+    // platform's real naming/formatting rationale), else a minimal generated
+    // stub.
+    let readme_src = platform_dir.join("README.md");
+    let readme_dst = out_dir.join("README.md");
+    if readme_src.is_file() {
+        std::fs::copy(&readme_src, &readme_dst)
+            .into_diagnostic()
+            .wrap_err("failed to copy README.md")?;
+    } else {
+        std::fs::write(
+            &readme_dst,
+            format!(
+                "# {id} design data\n\nEjected from `adobe/spectrum-design-data`'s \
+                 `platforms/{id}/` — see `.design-data.toml` for the pinned foundation \
+                 source.\n"
+            ),
+        )
+        .into_diagnostic()
+        .wrap_err("failed to write README.md")?;
+    }
+
+    // LICENSE — copy the monorepo's Apache-2.0 LICENSE verbatim, when locatable
+    // (best-effort: an ejected repo built from a non-standard checkout layout
+    // should still get everything else).
+    let resolved_for_schemas = resolve_data_source(CliPathOverrides {
+        platform_id: Some(id.to_string()),
+        ..Default::default()
+    })
+    .ok();
+    if let Some(schema_path) = resolved_for_schemas
+        .as_ref()
+        .and_then(|r| manifest::locate_manifest_schema(&r.schemas_root))
+    {
+        // schema_path = <repo>/packages/design-data-spec/schemas/manifest.schema.json
+        if let Some(repo_root) = schema_path.ancestors().nth(4) {
+            let license_src = repo_root.join("LICENSE");
+            if license_src.is_file() {
+                let _ = std::fs::copy(&license_src, out_dir.join("LICENSE"));
+            }
+        }
+    }
+
+    // .design-data.toml — pin the foundation via the same [source] github
+    // mechanism a remote `[platforms.<id>]` entry already uses, at the
+    // manifest's own foundationVersion tag.
+    let tag_line = foundation_version
+        .as_deref()
+        .map(|fv| format!("tag = \"{fv}\"\n"))
+        .unwrap_or_else(|| {
+            "# foundationVersion missing from manifest.json — set `tag` manually\n\
+             tag = \"@adobe/spectrum-design-data@0.0.0\"\n"
+                .to_string()
+        });
+    std::fs::write(
+        out_dir.join(".design-data.toml"),
+        format!(
+            "# Ejected from adobe/spectrum-design-data's platforms/{id}/ — see\n\
+             # https://github.com/adobe/spectrum-design-data/blob/main/docs/MIGRATION.md\n\
+             manifest = \"manifest.json\"\n\
+             \n\
+             [source]\n\
+             type = \"github\"\n\
+             repo = \"adobe/spectrum-design-data\"\n\
+             {tag_line}"
+        ),
+    )
+    .into_diagnostic()
+    .wrap_err("failed to write .design-data.toml")?;
+
+    // .github/workflows/validate.yml — the composite action's own documented
+    // usage (.github/actions/validate/README.md), with skip-dataset-validation
+    // set since an ejected manifest-only repo has no local tokens/ dir.
+    let workflows_dir = out_dir.join(".github").join("workflows");
+    std::fs::create_dir_all(&workflows_dir)
+        .into_diagnostic()
+        .wrap_err("failed to create .github/workflows")?;
+    std::fs::write(
+        workflows_dir.join("validate.yml"),
+        "name: Validate\n\
+         \n\
+         on:\n\
+         \x20\x20pull_request:\n\
+         \n\
+         jobs:\n\
+         \x20\x20validate:\n\
+         \x20\x20\x20\x20runs-on: ubuntu-latest\n\
+         \x20\x20\x20\x20steps:\n\
+         \x20\x20\x20\x20\x20\x20- uses: actions/checkout@v4\n\
+         \x20\x20\x20\x20\x20\x20- uses: adobe/spectrum-design-data/.github/actions/validate@main\n\
+         \x20\x20\x20\x20\x20\x20\x20\x20with:\n\
+         \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20dataset-path: .\n\
+         \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20manifest: manifest.json\n\
+         \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20skip-dataset-validation: true\n",
+    )
+    .into_diagnostic()
+    .wrap_err("failed to write .github/workflows/validate.yml")?;
+
+    // Weekly drift check that opens a PR bumping foundationVersion.
+    std::fs::write(
+        workflows_dir.join("foundation-drift.yml"),
+        "name: Foundation drift\n\
+         \n\
+         on:\n\
+         \x20\x20schedule:\n\
+         \x20\x20\x20\x20- cron: \"0 9 * * 1\"\n\
+         \x20\x20workflow_dispatch:\n\
+         \n\
+         permissions:\n\
+         \x20\x20contents: write\n\
+         \x20\x20pull-requests: write\n\
+         \n\
+         jobs:\n\
+         \x20\x20drift:\n\
+         \x20\x20\x20\x20runs-on: ubuntu-latest\n\
+         \x20\x20\x20\x20steps:\n\
+         \x20\x20\x20\x20\x20\x20- uses: actions/checkout@v4\n\
+         \x20\x20\x20\x20\x20\x20- uses: adobe/spectrum-design-data/.github/actions/validate@main\n\
+         \x20\x20\x20\x20\x20\x20\x20\x20with:\n\
+         \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20dataset-path: .\n\
+         \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20manifest: manifest.json\n\
+         \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20# Ejected repos are manifest-only: no local tokens/ to validate.\n\
+         \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20skip-dataset-validation: true\n\
+         \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20open-pr: true\n",
+    )
+    .into_diagnostic()
+    .wrap_err("failed to write .github/workflows/foundation-drift.yml")?;
+
+    // Opt-in: the repo owns codegen + build in `consumer/smoke.sh`, so this
+    // scaffold stays language-agnostic and hardcodes no token ids.
+    if with_consumer_smoke {
+        std::fs::write(
+            workflows_dir.join("consumer-smoke.yml"),
+            "name: Consumer smoke\n\
+             \n\
+             on:\n\
+             \x20\x20pull_request:\n\
+             \x20\x20\x20\x20paths:\n\
+             \x20\x20\x20\x20\x20\x20- manifest.json\n\
+             \x20\x20\x20\x20\x20\x20- extensions/**\n\
+             \x20\x20\x20\x20\x20\x20- .design-data.toml\n\
+             \x20\x20\x20\x20\x20\x20- consumer/**\n\
+             \x20\x20workflow_dispatch:\n\
+             \n\
+             permissions:\n\
+             \x20\x20contents: read\n\
+             \n\
+             jobs:\n\
+             \x20\x20smoke:\n\
+             \x20\x20\x20\x20# Edit runs-on (and add toolchain setup, e.g. a pinned Xcode) to match consumer/smoke.sh.\n\
+             \x20\x20\x20\x20runs-on: ubuntu-latest\n\
+             \x20\x20\x20\x20steps:\n\
+             \x20\x20\x20\x20\x20\x20- uses: actions/checkout@v4\n\
+             \x20\x20\x20\x20\x20\x20- uses: adobe/spectrum-design-data/.github/actions/validate@main\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20with:\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20install-only: true\n\
+             \x20\x20\x20\x20\x20\x20- name: Run consumer/smoke.sh\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20if: hashFiles('consumer/smoke.sh') != ''\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20env:\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20DESIGN_DATA_BIN: design-data\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20run: bash consumer/smoke.sh\n\
+             \x20\x20\x20\x20\x20\x20- name: Note missing smoke script\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20if: hashFiles('consumer/smoke.sh') == ''\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20run: echo \"::notice::consumer/smoke.sh not found; nothing to smoke-test\"\n",
+        )
+        .into_diagnostic()
+        .wrap_err("failed to write .github/workflows/consumer-smoke.yml")?;
+    }
+
+    println!("design-data: ejected \"{id}\" to {}", out_dir.display());
+    if with_consumer_smoke {
+        println!(
+            "Wrote .github/workflows/consumer-smoke.yml: add consumer/smoke.sh to your repo \
+             (it should regenerate consumer output via $DESIGN_DATA_BIN and build it, \
+             exiting non-zero on failure)."
+        );
+    }
+    println!();
+    println!("This does not carry git history. To preserve it:");
+    println!("  git subtree split --prefix=platforms/{id} -b eject/{id}");
+    println!("  # then, in a fresh clone of the destination repo (or as a new remote):");
+    println!("  git push <destination-repo-url> eject/{id}:main");
+    println!();
+    println!(
+        "Once pushed, flip `[platforms.{id}]` in this repo's `.design-data.toml` from a \
+         path to a `github` entry pointing at the destination repo (see \
+         docs/MIGRATION.md)."
+    );
+
+    Ok(ExitCode::SUCCESS)
+}
+
+/// checks (include/exclude query parse, override-target resolution).
+///
+/// Exit codes: `0` valid; `1` validation failure (schema violation, unlocatable schema,
+/// bad include/exclude query, missing override target); `2` no platform manifest
+/// configured or supplied via `--manifest`.
+fn run_validate_manifest(
+    explicit_path: Option<&Path>,
+    manifest_override: Option<PathBuf>,
+    format: OutputFormat,
+) -> miette::Result<ExitCode> {
+    let resolved = resolve_data_source(CliPathOverrides {
+        tokens_root: explicit_path.map(Path::to_path_buf),
+        platform_manifest: manifest_override,
+        ..Default::default()
+    })?;
+
+    let Some(manifest_path) = resolved.platform_manifest.clone() else {
+        let message = "no platform manifest configured (set the `.design-data.toml` \
+                        top-level `manifest` key, or pass --manifest <FILE>)";
+        match format {
+            OutputFormat::Json => {
+                println!("{}", serde_json::json!({"valid": false, "error": message}));
+            }
+            OutputFormat::Pretty => eprintln!("design-data: error: {message}"),
+        }
+        return Ok(ExitCode::from(2));
+    };
+
+    let path = &resolved.tokens_root;
+    let (mut graph, _index) = TokenGraph::open_cached_with_index_with_catalogs(
+        path,
+        resolved.mode_sets.as_deref(),
+        resolved.components.as_deref(),
+    )
+    .into_diagnostic()
+    .wrap_err_with(|| format!("failed to load tokens from {}", path.display()))?;
+
+    match manifest::apply_configured(&mut graph, &resolved) {
+        Ok(_) => {
+            // Advisory-only: does the manifest's optional `platform` identity field
+            // (h890.27.1) match a known id in the platform-implementations registry?
+            // Never affects the exit code — `platform` is a SHOULD, not a MUST.
+            let identity_warning = std::fs::read_to_string(&manifest_path)
+                .ok()
+                .and_then(|text| serde_json::from_str(&text).ok())
+                .and_then(|manifest_json| {
+                    manifest::check_platform_identity(&manifest_json, &resolved.schemas_root)
+                        .ok()
+                        .flatten()
+                });
+            match format {
+                OutputFormat::Json => {
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "valid": true,
+                            "manifest": manifest_path.display().to_string(),
+                            "warning": identity_warning,
+                        })
+                    );
+                }
+                OutputFormat::Pretty => {
+                    println!("design-data: {} is valid", manifest_path.display());
+                    if let Some(warning) = &identity_warning {
+                        eprintln!("design-data: warning: {warning}");
+                    }
+                }
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        Err(e) => {
+            match format {
+                OutputFormat::Json => {
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "valid": false,
+                            "manifest": manifest_path.display().to_string(),
+                            "error": e.to_string(),
+                        })
+                    );
+                }
+                OutputFormat::Pretty => {
+                    eprintln!(
+                        "design-data: error: {} failed validation:\n{e}",
+                        manifest_path.display()
+                    );
+                }
+            }
+            Ok(ExitCode::from(1))
+        }
+    }
+}
+
+fn run_migrate_verify(
+    path: &Path,
+    snapshot: &Path,
+    schema_path: Option<PathBuf>,
+    exceptions_path: Option<PathBuf>,
+) -> miette::Result<ExitCode> {
+    let resolved = resolve_data_source(CliPathOverrides {
+        schema_root: schema_path,
+        exceptions: exceptions_path,
+        ..Default::default()
+    })?;
+    let registry =
+        SchemaRegistry::load_legacy_token_schemas(&resolved.schemas_root).into_diagnostic()?;
+    let exceptions = load_exceptions(resolved.exceptions.as_deref())?;
+    let report =
+        validate::validate_all_with_exceptions(path, &registry, &exceptions).into_diagnostic()?;
+    let expected = load_snapshot(snapshot).into_diagnostic()?;
+    if snapshot_matches(&report, &expected) {
+        println!("Snapshot OK: {}", snapshot.display());
+        return Ok(ExitCode::SUCCESS);
+    }
+    let current = ValidationSnapshot::from(&report);
+    eprintln!("Snapshot mismatch with {}", snapshot.display());
+    eprintln!(
+        "current: {}",
+        serde_json::to_string_pretty(&current).into_diagnostic()?
+    );
+    Ok(ExitCode::from(1))
+}
+
+fn run_migrate_legacy_output(input: &Path, output: &Path) -> miette::Result<ExitCode> {
+    let summary = legacy::convert_dir(input, output)
+        .into_diagnostic()
+        .wrap_err_with(|| {
+            format!(
+                "legacy-output failed: {} → {}",
+                input.display(),
+                output.display()
+            )
+        })?;
+    println!(
+        "Converted {} file(s): {} tokens produced ({} sets, {} flat)",
+        summary.files_written,
+        summary.tokens_produced,
+        summary.sets_reconstructed,
+        summary.flat_tokens,
+    );
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_migrate_legacy_output_cascaded(
+    explicit_path: Option<&Path>,
+    output: &Path,
+) -> miette::Result<ExitCode> {
+    let resolved = resolve_data_source(CliPathOverrides {
+        tokens_root: explicit_path.map(Path::to_path_buf),
+        ..Default::default()
+    })?;
+    let path = &resolved.tokens_root;
+
+    let (mut graph, _index) = TokenGraph::open_cached_with_index_with_catalogs(
+        path,
+        resolved.mode_sets.as_deref(),
+        resolved.components.as_deref(),
+    )
+    .into_diagnostic()
+    .wrap_err_with(|| format!("failed to load tokens from {}", path.display()))?;
+
+    if let Some(dir) = resolved.relationships.as_deref() {
+        let rels = TokenGraph::load_spec_relationships(dir)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("failed to load relationships from {}", dir.display()))?;
+        graph = graph.with_relationships(rels);
+    }
+
+    // Apply the configured platform manifest (filters/overrides/extensions) — same
+    // cascade `run_query`/`run_resolve` apply — so this is the same dataset a
+    // platform's `resolve`/`query` calls see, not the raw foundation.
+    manifest::apply_configured(&mut graph, &resolved)
+        .into_diagnostic()
+        .wrap_err("failed to apply platform manifest cascade")?;
+
+    let (legacy_map, summary) = legacy::convert_graph(&graph)
+        .into_diagnostic()
+        .wrap_err("failed to convert cascaded dataset to legacy format")?;
+
+    if let Some(parent) = output.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).into_diagnostic()?;
+        }
+    }
+    let mut out_text =
+        serde_json::to_string_pretty(&serde_json::Value::Object(legacy_map)).into_diagnostic()?;
+    out_text.push('\n');
+    std::fs::write(output, out_text).into_diagnostic()?;
+
+    println!(
+        "Wrote {}: {} tokens produced ({} sets, {} flat)",
+        output.display(),
+        summary.tokens_produced,
+        summary.sets_reconstructed,
+        summary.flat_tokens,
+    );
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_migrate_add_uuids(dir: &Path) -> miette::Result<ExitCode> {
+    let summary = migrate::add_uuids(dir)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("add-uuids failed: {}", dir.display()))?;
+    println!(
+        "Scanned {} file(s): {} UUID(s) added across {} file(s)",
+        summary.files_scanned, summary.uuids_added, summary.files_modified,
+    );
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_migrate_roundtrip_verify(path: &Path) -> miette::Result<ExitCode> {
+    let diffs = legacy::roundtrip_verify(path)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("roundtrip-verify failed: {}", path.display()))?;
+    if diffs.is_empty() {
+        println!("Roundtrip OK: {}", path.display());
+        return Ok(ExitCode::SUCCESS);
+    }
+    for d in &diffs {
+        if d.token.is_empty() {
+            eprintln!("  {}: {}", d.file, d.detail);
+        } else {
+            eprintln!("  {}/{}: {}", d.file, d.token, d.detail);
+        }
+    }
+    eprintln!("{} difference(s) found", diffs.len());
+    Ok(ExitCode::from(1))
+}
+
+fn run_migrate_legacy_verify(cascade_dir: &Path, reference: &Path) -> miette::Result<ExitCode> {
+    let diffs = legacy::legacy_output_verify(cascade_dir, reference)
+        .into_diagnostic()
+        .wrap_err_with(|| {
+            format!(
+                "legacy-verify failed: {} vs {}",
+                cascade_dir.display(),
+                reference.display()
+            )
+        })?;
+    if diffs.is_empty() {
+        println!(
+            "Legacy output OK: {} matches {}",
+            cascade_dir.display(),
+            reference.display()
+        );
+        return Ok(ExitCode::SUCCESS);
+    }
+    for d in &diffs {
+        if d.token.is_empty() {
+            eprintln!("  {}: {}", d.file, d.detail);
+        } else {
+            eprintln!("  {}/{}: {}", d.file, d.token, d.detail);
+        }
+    }
+    eprintln!("{} difference(s) found", diffs.len());
+    Ok(ExitCode::from(1))
+}
+
+fn run_migrate_convert(
+    input: &Path,
+    output: &Path,
+    names_dir: Option<&Path>,
+    exceptions: Option<&Path>,
+) -> miette::Result<ExitCode> {
+    let opts = migrate::ConvertOptions {
+        names_dir: names_dir.map(PathBuf::from),
+        exceptions_path: exceptions.map(PathBuf::from),
+    };
+    let summary = migrate::convert_dir_with_options(input, output, &opts)
+        .into_diagnostic()
+        .wrap_err_with(|| {
+            format!(
+                "migration failed: {} → {}",
+                input.display(),
+                output.display()
+            )
+        })?;
+    println!(
+        "Converted {} file(s): {} tokens produced ({} set entries, {} flat)",
+        summary.files_written,
+        summary.tokens_produced,
+        summary.set_entries_unwrapped,
+        summary.flat_tokens_converted,
+    );
+    if summary.inline_names > 0
+        || summary.sidecar_names > 0
+        || summary.decomposed_names > 0
+        || summary.thin_names > 0
+    {
+        println!("\nName resolution:");
+        println!(
+            "  {:>5}  inline   (from existing name field)",
+            summary.inline_names
+        );
+        println!(
+            "  {:>5}  sidecar  (from token-names sidecar)",
+            summary.sidecar_names
+        );
+        println!(
+            "  {:>5}  decomposed (component + property + state)",
+            summary.decomposed_names
+        );
+        println!(
+            "  {:>5}  thin     (full key as property — tech debt)",
+            summary.thin_names
+        );
+        let total = summary.inline_names
+            + summary.sidecar_names
+            + summary.decomposed_names
+            + summary.thin_names;
+        if total > 0 {
+            let rich = summary.inline_names + summary.sidecar_names + summary.decomposed_names;
+            println!(
+                "  ──────\n  {:>5}  total  ({:.0}% structured)",
+                total,
+                100.0 * rich as f64 / total as f64
+            );
+        }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_migrate_snapshot(
+    path: &Path,
+    output: &Path,
+    schema_path: Option<PathBuf>,
+    exceptions_path: Option<PathBuf>,
+) -> miette::Result<ExitCode> {
+    let resolved = resolve_data_source(CliPathOverrides {
+        schema_root: schema_path,
+        exceptions: exceptions_path,
+        ..Default::default()
+    })?;
+    let registry =
+        SchemaRegistry::load_legacy_token_schemas(&resolved.schemas_root).into_diagnostic()?;
+    let exceptions = load_exceptions(resolved.exceptions.as_deref())?;
+    let report =
+        validate::validate_all_with_exceptions(path, &registry, &exceptions).into_diagnostic()?;
+    let snap = ValidationSnapshot::from(&report);
+    write_snapshot(output, &snap).into_diagnostic()?;
+    println!("Wrote {}", output.display());
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_diff(
+    old_path: &Path,
+    new_path: &Path,
+    format: DiffFormat,
+    filter_expr: Option<&str>,
+) -> miette::Result<ExitCode> {
+    let old_graph = TokenGraph::open_cached(old_path)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("failed to load old tokens from {}", old_path.display()))?;
+    let new_graph = TokenGraph::open_cached(new_path)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("failed to load new tokens from {}", new_path.display()))?;
+
+    // Optionally filter both graphs to matching tokens before diffing.
+    let (old_filtered, new_filtered) = if let Some(expr_str) = filter_expr {
+        let expr = query::parse(expr_str)
+            .into_diagnostic()
+            .wrap_err("failed to parse --filter expression")?;
+        let old_matched = query::filter(&old_graph, &expr);
+        let new_matched = query::filter(&new_graph, &expr);
+        (
+            TokenGraph::from_pairs(
+                old_matched
+                    .iter()
+                    .map(|t| (t.name.clone(), t.file.clone(), t.raw.clone()))
+                    .collect(),
+            ),
+            TokenGraph::from_pairs(
+                new_matched
+                    .iter()
+                    .map(|t| (t.name.clone(), t.file.clone(), t.raw.clone()))
+                    .collect(),
+            ),
+        )
+    } else {
+        (old_graph, new_graph)
+    };
+
+    let report = diff::semantic_diff(&old_filtered, &new_filtered);
+
+    match format {
+        DiffFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&report).into_diagnostic()?
+            );
+        }
+        DiffFormat::Markdown => {
+            print!("{}", format::format_diff_markdown(&report));
+        }
+        DiffFormat::Pretty => {
+            format::print_diff_pretty(&report);
+        }
+    }
+
+    if report.is_empty() {
+        Ok(ExitCode::SUCCESS)
+    } else {
+        Ok(ExitCode::from(1))
+    }
+}
+
+fn run_query(
+    explicit_path: Option<&Path>,
+    filter_expr: &str,
+    format: QueryFormat,
+    count_only: bool,
+    color_scheme: Option<String>,
+    scale: Option<String>,
+    contrast: Option<String>,
+) -> miette::Result<ExitCode> {
+    let resolved = resolve_data_source(CliPathOverrides {
+        tokens_root: explicit_path.map(Path::to_path_buf),
+        ..Default::default()
+    })?;
+    let path = &resolved.tokens_root;
+
+    let (mut graph, mut index) = TokenGraph::open_cached_with_index_with_catalogs(
+        path,
+        resolved.mode_sets.as_deref(),
+        resolved.components.as_deref(),
+    )
+    .into_diagnostic()
+    .wrap_err_with(|| format!("failed to load tokens from {}", path.display()))?;
+
+    // Apply a configured platform manifest (filters/overrides/extensions) before querying.
+    let restrictions = manifest::apply_configured(&mut graph, &resolved)
+        .into_diagnostic()
+        .wrap_err("failed to apply platform manifest cascade")?;
+    // Manifest overlays change the token set — rebuild the index when one is configured.
+    if resolved.platform_manifest.is_some() {
+        index = query::TokenIndex::build(&graph);
+    }
+
+    let expr = query::parse(filter_expr)
+        .into_diagnostic()
+        .wrap_err("failed to parse filter expression")?;
+
+    let results = query::filter_with_index(&graph, &index, &expr);
+
+    if count_only {
+        println!("{}", results.len());
+        return if results.is_empty() {
+            Ok(ExitCode::from(1))
+        } else {
+            Ok(ExitCode::SUCCESS)
+        };
+    }
+
+    match format {
+        QueryFormat::Dtcg => {
+            let mut resolve_ctx = ResolutionContext::new();
+            if let Some(m) = color_scheme {
+                resolve_ctx = resolve_ctx.with("colorScheme", m);
+            }
+            if let Some(m) = scale {
+                resolve_ctx = resolve_ctx.with("scale", m);
+            }
+            if let Some(m) = contrast {
+                resolve_ctx = resolve_ctx.with("contrast", m);
+            }
+            for (mode_set, allowed) in &restrictions {
+                resolve_ctx = resolve_ctx.with_restriction(mode_set.clone(), allowed.clone());
+            }
+
+            let matched_identities: HashSet<String> = results
+                .iter()
+                .filter_map(|t| t.raw.get("name").and_then(|v| v.as_object()))
+                .map(|n| cascade::token_identity_key(n, &graph.mode_sets))
+                .collect();
+
+            let winners = resolve_dataset_winners(&graph, &resolve_ctx, Some(&matched_identities));
+            let doc = winners_to_dtcg_doc(&graph, &winners, &resolve_ctx.mode_sets);
+            println!("{}", serde_json::to_string_pretty(&doc).into_diagnostic()?);
+        }
+        QueryFormat::Json => {
+            let raw_values: Vec<&serde_json::Value> = results.iter().map(|t| &t.raw).collect();
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&raw_values).into_diagnostic()?
+            );
+        }
+        QueryFormat::Pretty => {
+            if results.is_empty() {
+                println!("No matching tokens.");
+            } else {
+                println!("{} token(s) matched:\n", results.len());
+                for t in &results {
+                    let name = display_name(t);
+                    let uuid = t.uuid.as_deref().unwrap_or("-");
+                    let schema = t.raw.get("$schema").and_then(|v| v.as_str()).unwrap_or("-");
+                    println!("  {name}");
+                    println!("    UUID:    {uuid}");
+                    println!("    Schema:  {schema}");
+                    println!("    File:    {}", t.file.display());
+                    println!();
+                }
+            }
+        }
+    }
+
+    if results.is_empty() {
+        Ok(ExitCode::from(1))
+    } else {
+        Ok(ExitCode::SUCCESS)
+    }
+}
+
+/// `design-data export [PATH]` — export the whole resolved dataset: every distinct
+/// token property resolved to its cascade winner in the given mode context, merged
+/// into one flat document. Mirrors `run_resolve`'s data-loading/mode-context setup,
+/// but emits every property instead of one.
+fn run_export(
+    explicit_path: Option<&Path>,
+    mode_sets_path: Option<PathBuf>,
+    color_scheme: Option<String>,
+    scale: Option<String>,
+    contrast: Option<String>,
+    format: ExportFormat,
+) -> miette::Result<ExitCode> {
+    let mut resolve_ctx = ResolutionContext::new();
+    if let Some(m) = color_scheme {
+        resolve_ctx = resolve_ctx.with("colorScheme", m);
+    }
+    if let Some(m) = scale {
+        resolve_ctx = resolve_ctx.with("scale", m);
+    }
+    if let Some(m) = contrast {
+        resolve_ctx = resolve_ctx.with("contrast", m);
+    }
+
+    let resolved = resolve_data_source(CliPathOverrides {
+        tokens_root: explicit_path.map(Path::to_path_buf),
+        mode_sets: mode_sets_path,
+        ..Default::default()
+    })?;
+    let path = &resolved.tokens_root;
+
+    let mut graph = TokenGraph::open_cached_with_catalogs(
+        path,
+        resolved.mode_sets.as_deref(),
+        resolved.components.as_deref(),
+    )
+    .into_diagnostic()
+    .wrap_err_with(|| format!("failed to load tokens from {}", path.display()))?;
+
+    let restrictions = manifest::apply_configured(&mut graph, &resolved)
+        .into_diagnostic()
+        .wrap_err("failed to apply platform manifest cascade")?;
+    for (mode_set, allowed) in &restrictions {
+        resolve_ctx = resolve_ctx.with_restriction(mode_set.clone(), allowed.clone());
+    }
+
+    let winners = resolve_dataset_winners(&graph, &resolve_ctx, None);
+
+    match format {
+        ExportFormat::Dtcg => {
+            let doc = winners_to_dtcg_doc(&graph, &winners, &resolve_ctx.mode_sets);
+            println!("{}", serde_json::to_string_pretty(&doc).into_diagnostic()?);
+        }
+        ExportFormat::Json => {
+            let raw_values: Vec<&serde_json::Value> = winners.iter().map(|t| &t.raw).collect();
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&raw_values).into_diagnostic()?
+            );
+        }
+    }
+
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Load a legacyKey → Figma-name override map from a `figma audit` artifact
+/// (which nests it under an `overrides` field) or a bare `{legacyKey: name}`
+/// JSON object. Empty-string values (the artifact's "needs a decision"
+/// placeholder) are dropped.
+fn load_overrides(path: &Path) -> miette::Result<HashMap<String, String>> {
+    let text = std::fs::read_to_string(path)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("reading mapping file {}", path.display()))?;
+    let value: serde_json::Value = serde_json::from_str(&text)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("parsing mapping file {}", path.display()))?;
+    let map = value.get("overrides").unwrap_or(&value);
+    let entries = map
+        .as_object()
+        .ok_or_else(|| miette::miette!("mapping file {} is not a JSON object", path.display()))?;
+    Ok(entries
+        .iter()
+        .filter_map(|(k, v)| {
+            v.as_str()
+                .filter(|s| !s.is_empty())
+                .map(|s| (k.clone(), s.to_string()))
+        })
+        .collect())
+}
+
+#[derive(clap::Args)]
+struct FigmaWriteOptions {
+    /// Generate payload with a read-only GET; do not write to Figma
+    #[arg(long)]
+    dry_run: bool,
+    /// Override detected concurrent changes (warns; readback remains required)
+    #[arg(long)]
+    allow_concurrent_changes: bool,
+    /// Skip readback verification and report an explicitly unverified write
+    #[arg(long)]
+    skip_readback_verification: bool,
+    /// Directory for preflight, readback and ambiguous-outcome JSON reports
+    #[arg(long, value_name = "DIR")]
+    verification_out: Option<PathBuf>,
+    /// Absolute tolerance for written scalar/color values; untouched state is exact
+    #[arg(long, default_value_t = figma::write_guard::DEFAULT_NUMERIC_TOLERANCE)]
+    numeric_tolerance: f64,
+    #[arg(long, env = "FIGMA_API_BASE_URL", hide = true)]
+    figma_api_base_url: Option<String>,
+}
+
+fn write_figma_report(
+    directory: Option<&Path>,
+    name: &str,
+    report: &serde_json::Value,
+) -> miette::Result<()> {
+    if let Some(directory) = directory {
+        std::fs::write(directory.join(name), serde_json::to_vec_pretty(report).into_diagnostic()?)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("writing Figma report {name}; if POST was attempted, inspect the live file before retrying"))?;
+    }
+    Ok(())
+}
+
+/// Load the tokens `figma export`/`audit` map to variables.
+///
+/// Cascade data (the resolved design-data dataset, or a `.tokens.json`
+/// directory) is projected in memory from a [`TokenGraph`], with any platform
+/// manifest cascade applied. Only an explicit legacy-format directory without a
+/// manifest is read as flat legacy JSON.
+fn load_figma_tokens(
+    path: Option<&Path>,
+    manifest: Option<&Path>,
+) -> miette::Result<(
+    Vec<figma::mapping::ExportToken>,
+    Vec<figma::mapping::CollectionSpec>,
+)> {
+    if path.is_some_and(|dir| !dir_has_cascade_tokens(dir)) {
+        miette::bail!("Figma export/audit requires canonical .tokens.json data; legacy directories are no longer supported");
+    }
+    let resolved = resolve_data_source(CliPathOverrides {
+        tokens_root: path.map(Path::to_path_buf),
+        platform_manifest: manifest.map(Path::to_path_buf),
+        ..Default::default()
+    })?;
+    let (mut graph, _index) = TokenGraph::open_cached_with_index_with_catalogs(
+        &resolved.tokens_root,
+        resolved.mode_sets.as_deref(),
+        resolved.components.as_deref(),
+    )
+    .into_diagnostic()
+    .wrap_err_with(|| {
+        format!(
+            "failed to load tokens from {}",
+            resolved.tokens_root.display()
+        )
+    })?;
+    if let Some(dir) = resolved.relationships.as_deref() {
+        let rels = TokenGraph::load_spec_relationships(dir)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("failed to load relationships from {}", dir.display()))?;
+        graph = graph.with_relationships(rels);
+    }
+    manifest::apply_configured(&mut graph, &resolved)
+        .into_diagnostic()
+        .wrap_err("failed to apply platform manifest cascade")?;
+    let specs =
+        figma::mapping::collection_specs(&graph.mode_sets).map_err(|e| miette::miette!("{e}"))?;
+    let tokens = figma::mapping::export_tokens(&graph).map_err(|e| miette::miette!("{e}"))?;
+    Ok((tokens, specs))
+}
+
+fn dir_has_cascade_tokens(dir: &Path) -> bool {
+    std::fs::read_dir(dir).is_ok_and(|entries| {
+        entries.filter_map(Result::ok).any(|e| {
+            e.file_name()
+                .to_str()
+                .is_some_and(|n| n.ends_with(".tokens.json"))
+        })
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_figma_export(
+    path: Option<&Path>,
+    file_key: &str,
+    token: &str,
+    mapping: Option<&Path>,
+    manifest: Option<&Path>,
+    code_syntax_manifests: &[String],
+    redirect_deprecated: bool,
+    modeless_layer: bool,
+    no_folder_prefix: bool,
+    write_options: &FigmaWriteOptions,
+) -> miette::Result<ExitCode> {
+    use figma::write_guard;
+    use sha2::{Digest, Sha256};
+
+    write_guard::validate_tolerance(write_options.numeric_tolerance).into_diagnostic()?;
+    let rt = tokio::runtime::Runtime::new().into_diagnostic()?;
+    let client = match &write_options.figma_api_base_url {
+        Some(base_url) => {
+            figma::api::FigmaClient::with_base_url(token.to_string(), base_url).into_diagnostic()?
+        }
+        None => figma::api::FigmaClient::new(token.to_string()),
+    };
+
+    // 0. Load name-mapping overrides, if given.
+    let overrides = mapping.map(load_overrides).transpose()?;
+
+    // 0b. Load per-platform `formatting` configs for extra `codeSyntax` entries
+    // (`--code-syntax-manifest ANDROID=path/to/android.manifest.json`, repeatable).
+    let mut platform_formats = Vec::with_capacity(code_syntax_manifests.len());
+    for entry in code_syntax_manifests {
+        let (platform, manifest_path) = entry.split_once('=').ok_or_else(|| {
+            miette::miette!("--code-syntax-manifest expects PLATFORM=PATH, got {entry:?}")
+        })?;
+        // `WEB` already carries the authoritative `--spectrum-{legacyKey}` name
+        // (set unconditionally in `make_variable_action`); a `formatting`-derived
+        // reconstruction is strictly lossier, so reject it here rather than let
+        // `augment_code_syntax_with_platform_formats` silently overwrite it.
+        if platform.eq_ignore_ascii_case("WEB") {
+            return Err(miette::miette!(
+                "--code-syntax-manifest WEB is not supported: WEB's codeSyntax is already set to the authoritative --spectrum-{{legacyKey}} name"
+            ));
+        }
+        let config = manifest::load_formatting_config(Path::new(manifest_path))
+            .into_diagnostic()
+            .wrap_err_with(|| format!("failed to load platform manifest {manifest_path}"))?
+            .ok_or_else(|| {
+                miette::miette!("platform manifest {manifest_path} has no `formatting` block")
+            })?;
+        platform_formats.push((platform.to_string(), config));
+    }
+    // 1. Load tokens (cascade graph projection, or a legacy dir when given).
+    let (tokens, specs) = load_figma_tokens(path, manifest)?;
+    let specs = if no_folder_prefix {
+        figma::mapping::without_folder_prefix(specs)
+    } else {
+        specs
+    };
+
+    // 2. GET existing variables to obtain collection/mode IDs.
+    eprintln!("Fetching existing variables from Figma...");
+    let (response, baseline) = rt
+        .block_on(client.get_local_variables_with_raw(file_key))
+        .map_err(|e| miette::miette!("{e}"))?;
+
+    // 3. Build the export payload.
+    eprintln!("Building export payload...");
+    let (mut body, mut summary) = figma::mapping::build_export_payload_with_options(
+        &tokens,
+        &specs,
+        &response.meta,
+        overrides.as_ref(),
+        &platform_formats,
+        redirect_deprecated,
+    )
+    .map_err(|e| miette::miette!("{e}"))?;
+    if modeless_layer {
+        figma::mapping::append_modeless_layer(
+            &mut body,
+            &mut summary,
+            &tokens,
+            &specs,
+            &response.meta,
+            overrides.as_ref(),
+        )
+        .map_err(|e| miette::miette!("{e}"))?;
+    }
+
+    let payload = serde_json::to_value(&body).into_diagnostic()?;
+    // 4. Output or guard, post once, then verify.
+    if write_options.dry_run {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&payload).into_diagnostic()?
+        );
+    } else {
+        write_guard::validate_payload(&baseline, &payload).into_diagnostic()?;
+        let report_dir = write_options.verification_out.as_deref();
+        if let Some(directory) = report_dir {
+            std::fs::create_dir_all(directory).into_diagnostic()?;
+            for name in ["preflight.json", "readback.json", "ambiguous-outcome.json"] {
+                let pending = serde_json::json!({"verified": false, "outcome": "not_attempted"});
+                let mut file = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(directory.join(name))
+                    .into_diagnostic()
+                    .wrap_err(
+                        "verification reports require a fresh directory; no POST attempted",
+                    )?;
+                std::io::Write::write_all(
+                    &mut file,
+                    &serde_json::to_vec_pretty(&pending).into_diagnostic()?,
+                )
+                .into_diagnostic()?;
+            }
+        }
+        let current = rt
+            .block_on(client.get_local_variables_raw(file_key))
+            .into_diagnostic()
+            .wrap_err("preflight GET failed; no POST attempted")?;
+        let drift = write_guard::check_concurrent_change(&baseline, &current);
+        let bytes = serde_json::to_vec(&payload).into_diagnostic()?;
+        let creates = body
+            .variables
+            .iter()
+            .filter(|v| v.action == "CREATE")
+            .count();
+        write_figma_report(
+            report_dir,
+            "preflight.json",
+            &serde_json::json!({
+                "concurrentChangesDetected": drift.is_err(),
+                "concurrentChangesOverridden": drift.is_err() && write_options.allow_concurrent_changes,
+                "creates": creates,
+                "updates": body.variables.len() - creates,
+                "deletions": 0,
+                "modeValues": body.variable_mode_values.len(),
+                "aliasValues": summary.mode_values_aliased,
+                "payloadSha256": format!("{:x}", Sha256::digest(&bytes)),
+                "numericTolerance": write_options.numeric_tolerance,
+                "readbackSkipped": write_options.skip_readback_verification,
+            }),
+        )?;
+        if let Err(ref error) = drift {
+            if !write_options.allow_concurrent_changes {
+                return Err(miette::miette!(
+                    "{error}; POST aborted. Rebuild the payload from a fresh baseline."
+                ));
+            }
+            eprintln!("WARNING: overriding concurrent changes: {error}");
+        }
+        // Even with an override, protect newly observed unrelated state in readback.
+        write_guard::validate_payload(&current, &payload).into_diagnostic()?;
+        eprintln!(
+            "Posting {} variables to Figma...",
+            summary.variables_created
+        );
+        let post_response = match rt.block_on(client.post_variables_raw(file_key, &payload)) {
+            Ok(response) => response,
+            Err(error @ figma::FigmaError::AmbiguousWrite(_)) => {
+                let probe = match rt.block_on(client.get_local_variables_raw(file_key)) {
+                    Ok(after) => {
+                        if creates == 0
+                            && write_guard::verify_readback(
+                                &current,
+                                &after,
+                                &payload,
+                                &HashMap::new(),
+                                write_options.numeric_tolerance,
+                            )
+                            .is_ok()
+                        {
+                            "read-only probe matches the expected UPDATE effects; POST acceptance remains unknown".to_string()
+                        } else {
+                            match write_guard::check_concurrent_change(&current, &after) {
+                                Ok(()) => "read-only probe found unchanged state; POST acceptance remains unknown".to_string(),
+                                Err(_) => "read-only probe found changed state; the intended write cannot be verified".to_string(),
+                            }
+                        }
+                    }
+                    Err(_) => "read-only probe failed; live state remains unknown".to_string(),
+                };
+                write_figma_report(
+                    report_dir,
+                    "ambiguous-outcome.json",
+                    &serde_json::json!({
+                        "verified": false, "outcome": "ambiguous", "probe": probe,
+                        "automaticMutationRetries": 0,
+                    }),
+                )?;
+                return Err(miette::miette!("{error}. {probe}. No automatic retry; verify the live file manually before any further write."));
+            }
+            Err(error) => return Err(miette::miette!("{error}")),
+        };
+        if write_options.skip_readback_verification {
+            eprintln!(
+                "WARNING: unverified write accepted; readback verification was explicitly skipped."
+            );
+            write_figma_report(
+                report_dir,
+                "readback.json",
+                &serde_json::json!({
+                    "verified": false, "readbackSkipped": true,
+                }),
+            )?;
+        } else {
+            let after = match rt.block_on(client.get_local_variables_raw(file_key)) {
+                Ok(after) => after,
+                Err(error) => {
+                    write_figma_report(
+                        report_dir,
+                        "readback.json",
+                        &serde_json::json!({
+                            "verified": false, "outcome": "readback_failed",
+                        }),
+                    )?;
+                    return Err(miette::miette!("POST accepted but readback GET failed: {error}. Write is unverified. Inspect the live file before retrying; no automatic retry."));
+                }
+            };
+            let result = write_guard::verify_readback(
+                &current,
+                &after,
+                &payload,
+                &post_response.meta.temp_id_to_real_id,
+                write_options.numeric_tolerance,
+            );
+            match result {
+                Ok(report) => {
+                    write_figma_report(
+                        report_dir,
+                        "readback.json",
+                        &serde_json::to_value(report).into_diagnostic()?,
+                    )?;
+                    eprintln!(
+                        "Done. Figma write verified. {} ID mappings returned.",
+                        post_response.meta.temp_id_to_real_id.len()
+                    );
+                }
+                Err(error) => {
+                    write_figma_report(
+                        report_dir,
+                        "readback.json",
+                        &serde_json::json!({
+                            "verified": false, "error": error.to_string(),
+                        }),
+                    )?;
+                    return Err(miette::miette!("{error}. POST was accepted; inspect the live file before retrying. No automatic retry."));
+                }
+            }
+        }
+    }
+
+    // 5. Print summary to stderr.
+    eprintln!(
+        "\nSummary: {} variables, {} mode values ({} aliased)",
+        summary.variables_created,
+        summary.mode_values_set + summary.mode_values_aliased,
+        summary.mode_values_aliased
+    );
+    if !summary.skipped_composite.is_empty() {
+        eprintln!("  Skipped (composite): {}", summary.skipped_composite.len());
+    }
+    if !summary.skipped_alias_unresolved.is_empty() {
+        eprintln!(
+            "  Skipped (unresolved alias): {}",
+            summary.skipped_alias_unresolved.len()
+        );
+    }
+    if !summary.skipped_unknown_schema.is_empty() {
+        eprintln!(
+            "  Skipped (unknown schema): {}",
+            summary.skipped_unknown_schema.len()
+        );
+    }
+    for reason in &summary.skipped_alias_unsupported {
+        eprintln!("  Skipped (unsupported alias target): {reason}");
+    }
+    if !summary.skipped_unparseable_value.is_empty() {
+        eprintln!(
+            "  Skipped (unparseable value): {} — {:?}",
+            summary.skipped_unparseable_value.len(),
+            summary.skipped_unparseable_value,
+        );
+    }
+    if !summary.skipped_unsupported_unit.is_empty() {
+        eprintln!(
+            "  Skipped (unsupported unit): {} — {:?}",
+            summary.skipped_unsupported_unit.len(),
+            summary.skipped_unsupported_unit,
+        );
+    }
+    if !summary.redirected_deprecated.is_empty() {
+        eprintln!(
+            "  Redirected deprecated tokens to their replacement: {}",
+            summary.redirected_deprecated.len(),
+        );
+    }
+    if !summary.redirect_skipped.is_empty() {
+        eprintln!(
+            "  Not redirected (kept own value): {}",
+            summary.redirect_skipped.len(),
+        );
+        for reason in &summary.redirect_skipped {
+            eprintln!("    {reason}");
+        }
+    }
+    if !summary.mode_warnings.is_empty() {
+        for w in &summary.mode_warnings {
+            eprintln!("    {w}");
+        }
+    }
+
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Read a Figma file's current variable values and emit manifest `overrides`
+/// entries for the ones that diverge from the manifest-resolved source.
+fn run_figma_import(
+    path: &Path,
+    file_key: &str,
+    token: &str,
+    manifest_path: &Path,
+    mapping: Option<&Path>,
+    out: Option<&Path>,
+) -> miette::Result<ExitCode> {
+    let rt = tokio::runtime::Runtime::new().into_diagnostic()?;
+    let client = figma::api::FigmaClient::new(token.to_string());
+
+    // 0. Load the name-mapping artifact, if given, and reverse it: export maps
+    // legacyKey -> figmaName, import needs figmaName -> legacyKey.
+    let renames = mapping
+        .map(|p| {
+            load_overrides(p).map(|m| {
+                m.into_iter()
+                    .map(|(k, v)| (v, k))
+                    .collect::<HashMap<_, _>>()
+            })
+        })
+        .transpose()?;
+
+    // 1. Load the same manifest-resolved TokenGraph `figma export` reads, so
+    // overrides target the records it exported.
+    let resolved = resolve_data_source(CliPathOverrides {
+        tokens_root: Some(path.to_path_buf()),
+        platform_manifest: Some(manifest_path.to_path_buf()),
+        ..Default::default()
+    })?;
+    let (mut graph, _index) = TokenGraph::open_cached_with_index_with_catalogs(
+        &resolved.tokens_root,
+        resolved.mode_sets.as_deref(),
+        resolved.components.as_deref(),
+    )
+    .into_diagnostic()
+    .wrap_err_with(|| format!("failed to load tokens from {}", path.display()))?;
+    manifest::apply_configured(&mut graph, &resolved)
+        .into_diagnostic()
+        .wrap_err("failed to apply platform manifest cascade")?;
+
+    // 2. GET the file's current variables.
+    eprintln!("Fetching variables from Figma...");
+    let response = rt
+        .block_on(client.get_local_variables(file_key))
+        .map_err(|e| miette::miette!("{e}"))?;
+
+    // 3. Diff against the resolved graph.
+    let (overrides, summary) =
+        figma::import::build_import_overrides(&response.meta, &graph, renames.as_ref());
+
+    // 4. Wrap into a manifest fragment, carrying the source manifest's version fields.
+    let manifest_text = std::fs::read_to_string(manifest_path)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("reading manifest {}", manifest_path.display()))?;
+    let manifest_json: serde_json::Value =
+        serde_json::from_str(&manifest_text)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("parsing manifest {}", manifest_path.display()))?;
+    let output = serde_json::json!({
+        "specVersion": manifest_json.get("specVersion").cloned().unwrap_or_else(|| serde_json::json!("1.0.0-draft")),
+        "foundationVersion": manifest_json.get("foundationVersion").cloned().unwrap_or_else(|| serde_json::json!("1.0.0")),
+        "overrides": overrides,
+    });
+    let text = serde_json::to_string_pretty(&output).into_diagnostic()?;
+    match out {
+        Some(out_path) => std::fs::write(out_path, &text)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("writing {}", out_path.display()))?,
+        None => println!("{text}"),
+    }
+
+    eprintln!(
+        "\nSummary: {} overrides, {} unchanged",
+        summary.overrides_emitted, summary.unchanged
+    );
+    if !summary.unmapped.is_empty() {
+        eprintln!(
+            "  Unmapped: {} — {:?}",
+            summary.unmapped.len(),
+            summary.unmapped
+        );
+    }
+    if !summary.multimode_divergent.is_empty() {
+        eprintln!(
+            "  Multi-mode divergent (no single value to emit): {} — {:?}",
+            summary.multimode_divergent.len(),
+            summary.multimode_divergent,
+        );
+    }
+    if !summary.unconvertible.is_empty() {
+        eprintln!(
+            "  Unconvertible: {} — {:?}",
+            summary.unconvertible.len(),
+            summary.unconvertible,
+        );
+    }
+
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Audit generated Figma Variable names against a captured snapshot — entirely
+/// offline, no network call and no token required.
+fn run_figma_audit(
+    snapshot: &Path,
+    token_dir: Option<&Path>,
+    no_folder_prefix: bool,
+    format: OutputFormat,
+) -> miette::Result<ExitCode> {
+    let text = std::fs::read_to_string(snapshot)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("failed to read snapshot {}", snapshot.display()))?;
+    let meta: figma::types::VariablesMeta = serde_json::from_str(&text)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("failed to parse snapshot {}", snapshot.display()))?;
+
+    let (tokens, specs) = load_figma_tokens(token_dir, None)?;
+    let specs = if no_folder_prefix {
+        figma::mapping::without_folder_prefix(specs)
+    } else {
+        specs
+    };
+    let report =
+        figma::audit::audit_tokens(&meta, &tokens, &specs).map_err(|e| miette::miette!("{e}"))?;
+
+    match format {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&report).into_diagnostic()?
+            );
+        }
+        OutputFormat::Pretty => {
+            for c in &report.collections {
+                println!(
+                    "{}: {} real, covered={}, matched={}, figma_only={}, generated_only={}",
+                    c.collection_name,
+                    c.real_variable_count,
+                    c.generator_covers,
+                    c.matched,
+                    c.figma_only.len(),
+                    c.generated_only.len(),
+                );
+            }
+            println!(
+                "\nSkipped: composite={} unresolved_alias={} unknown_schema={} unparseable={} unsupported_unit={} unsupported_alias={}",
+                report.skipped_composite.len(),
+                report.skipped_alias_unresolved.len(),
+                report.skipped_unknown_schema.len(),
+                report.skipped_unparseable_value.len(),
+                report.skipped_unsupported_unit.len(),
+                report.skipped_alias_unsupported.len(),
+            );
+            for reason in &report.skipped_alias_unsupported {
+                println!("  Unsupported alias target: {reason}");
+            }
+            println!("Overrides needing a decision: {}", report.overrides.len());
+        }
+    }
+
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Public variable names versus the names generated from design-data. Offline.
+fn run_figma_public_names(
+    snapshot: &Path,
+    csv: Option<&Path>,
+    markdown: Option<&Path>,
+    format: OutputFormat,
+) -> miette::Result<ExitCode> {
+    let text = std::fs::read_to_string(snapshot)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("failed to read snapshot {}", snapshot.display()))?;
+    let value: serde_json::Value = serde_json::from_str(&text).into_diagnostic()?;
+    let meta: figma::types::VariablesMeta =
+        serde_json::from_value(value.get("meta").cloned().unwrap_or(value))
+            .into_diagnostic()
+            .wrap_err("snapshot is neither a variables/local response nor a VariablesMeta")?;
+    let graph = load_resolved_graph(None)?;
+    let report = figma::public_names::report(&meta, &figma::public_names::source_index(&graph));
+    if let Some(p) = csv {
+        std::fs::write(p, report.to_csv()).into_diagnostic()?;
+    }
+    if let Some(p) = markdown {
+        std::fs::write(p, report.to_markdown()).into_diagnostic()?;
+    }
+    match format {
+        OutputFormat::Json => println!(
+            "{}",
+            serde_json::to_string_pretty(&report).into_diagnostic()?
+        ),
+        OutputFormat::Pretty => {
+            for (collection, classes) in &report.summary {
+                println!("{collection}: {classes:?}");
+            }
+            println!(
+                "hidden-only variables needing a public alias: {}",
+                report.hidden_only.len()
+            );
+        }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Value-level diff between the manifest-resolved dataset and a Figma file —
+/// read-only counterpart to `figma import`. Either `--snapshot` (offline, no
+/// token needed) or `--file-key`/`--token` (a live API call) must be given.
+type FigmaDiffInputs = (
+    figma::types::VariablesMeta,
+    Option<HashMap<String, String>>,
+    TokenGraph,
+);
+
+/// The manifest-resolved `TokenGraph` (tokens, relationships, platform cascade) that
+/// `figma export`, `import`, `diff` and `public-names` read.
+fn load_resolved_graph(manifest: Option<&Path>) -> miette::Result<TokenGraph> {
+    let resolved = resolve_data_source(CliPathOverrides {
+        platform_manifest: manifest.map(Path::to_path_buf),
+        ..Default::default()
+    })?;
+    let (mut graph, _index) = TokenGraph::open_cached_with_index_with_catalogs(
+        &resolved.tokens_root,
+        resolved.mode_sets.as_deref(),
+        resolved.components.as_deref(),
+    )
+    .into_diagnostic()
+    .wrap_err_with(|| {
+        format!(
+            "failed to load tokens from {}",
+            resolved.tokens_root.display()
+        )
+    })?;
+    if let Some(dir) = resolved.relationships.as_deref() {
+        let rels = TokenGraph::load_spec_relationships(dir)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("failed to load relationships from {}", dir.display()))?;
+        graph = graph.with_relationships(rels);
+    }
+    manifest::apply_configured(&mut graph, &resolved)
+        .into_diagnostic()
+        .wrap_err("failed to apply platform manifest cascade")?;
+
+    Ok(graph)
+}
+
+/// Load a Figma `VariablesMeta` (offline snapshot or live fetch), the
+/// name-mapping artifact (if given), and the manifest-resolved `TokenGraph` —
+/// the setup `figma diff` and `figma pair` both need before their own
+/// comparison logic diverges.
+fn load_figma_diff_inputs(
+    file_key: Option<&str>,
+    token: Option<&str>,
+    snapshot: Option<&Path>,
+    mapping: Option<&Path>,
+    manifest: Option<&Path>,
+) -> miette::Result<FigmaDiffInputs> {
+    // 0. Get the file's variables — offline from a snapshot, or a live fetch.
+    let meta: figma::types::VariablesMeta = if let Some(snapshot_path) = snapshot {
+        let text = std::fs::read_to_string(snapshot_path)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("failed to read snapshot {}", snapshot_path.display()))?;
+        serde_json::from_str(&text)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("failed to parse snapshot {}", snapshot_path.display()))?
+    } else {
+        let file_key = file_key.ok_or_else(|| {
+            miette::miette!("either --snapshot or --file-key/--token is required")
+        })?;
+        let token = token.ok_or_else(|| {
+            miette::miette!("either --snapshot or --file-key/--token is required")
+        })?;
+        let rt = tokio::runtime::Runtime::new().into_diagnostic()?;
+        let client = figma::api::FigmaClient::new(token.to_string());
+        eprintln!("Fetching variables from Figma...");
+        rt.block_on(client.get_local_variables(file_key))
+            .map_err(|e| miette::miette!("{e}"))?
+            .meta
+    };
+
+    // 1. Load the name-mapping artifact, if given — same forward direction
+    // (legacyKey -> figmaName) `figma export`/`build_export_payload` use.
+    let mapping_map = mapping.map(load_overrides).transpose()?;
+
+    // 2. Load the manifest-resolved TokenGraph, same as `figma export`/`import`.
+    let graph = load_resolved_graph(manifest)?;
+
+    Ok((meta, mapping_map, graph))
+}
+
+fn run_figma_diff(
+    file_key: Option<&str>,
+    token: Option<&str>,
+    snapshot: Option<&Path>,
+    mapping: Option<&Path>,
+    manifest: Option<&Path>,
+    no_folder_prefix: bool,
+    format: OutputFormat,
+) -> miette::Result<ExitCode> {
+    let (meta, mapping_map, graph) =
+        load_figma_diff_inputs(file_key, token, snapshot, mapping, manifest)?;
+
+    // 3. Diff.
+    let report = figma::import::diff_values_with_options(
+        &meta,
+        &graph,
+        mapping_map.as_ref(),
+        no_folder_prefix,
+    )
+    .map_err(|e| miette::miette!("{e}"))?;
+
+    match format {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&report).into_diagnostic()?
+            );
+        }
+        OutputFormat::Pretty => {
+            let c = &report.counts;
+            // `renamed` is an orthogonal flag (a variable can be renamed *and*
+            // matched, mismatched, etc.), not a sibling partition — print it
+            // separately so the other six don't look like they should sum
+            // to the total entry count.
+            println!(
+                "match={} value-mismatch={} figma-only={} design-data-only={} skipped-uncovered={} multi-mode-mismatch={} (renamed={})",
+                c.matched, c.value_mismatch, c.figma_only, c.design_data_only, c.skipped_uncovered, c.multi_mode_mismatch, c.renamed,
+            );
+            for entry in report
+                .entries
+                .iter()
+                .filter(|e| !matches!(e.class, figma::import::DiffClass::Match))
+            {
+                println!("  {} — {:?}", entry.name, entry.class);
+            }
+        }
+    }
+
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Name prefixes whose Figma names don't reliably invert to a legacy key by
+/// convention (`Palette/` and the Typography atomic leaves do; see
+/// `invert_name`) — the prefixes [`figma::import::pair_by_value`] is asked
+/// to cover today.
+///
+/// These are real-file naming conventions observed in specific collections,
+/// not the exporter's own output — `mapping::collection_specs` models what
+/// `figma export` generates (`colorTheme/`, `platformScale/`) and has no
+/// entry for these, so there's nothing to derive this list from
+/// automatically. If a new prefix group shows up, add it here by hand.
+///
+/// `Heading/`/`Body/`/`Title/`/`Detail/`/`Code/` are the Typography
+/// collection's grouping variables: most decompose onto a handful of
+/// shared atomic values already claimed by the Typography leaf variables
+/// (see `normalize_typography_leaf`), so `pair_by_value` is expected to
+/// report the bulk of them `ambiguous` rather than producing candidates —
+/// that's a structural fact about the source data, not a bug in pairing.
+const PAIR_NAME_PREFIXES: &[&str] = &[
+    "Alias/", "Icon/", "Heading/", "Body/", "Title/", "Detail/", "Code/",
+];
+
+fn run_figma_pair(
+    file_key: Option<&str>,
+    token: Option<&str>,
+    snapshot: Option<&Path>,
+    mapping: Option<&Path>,
+    manifest: Option<&Path>,
+    format: OutputFormat,
+) -> miette::Result<ExitCode> {
+    let (meta, mapping_map, graph) =
+        load_figma_diff_inputs(file_key, token, snapshot, mapping, manifest)?;
+
+    let report =
+        figma::import::pair_by_value(&meta, &graph, PAIR_NAME_PREFIXES, mapping_map.as_ref());
+
+    match format {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&report).into_diagnostic()?
+            );
+        }
+        OutputFormat::Pretty => {
+            println!(
+                "candidates={} ambiguous={} unmatched={}",
+                report.candidates.len(),
+                report.ambiguous.len(),
+                report.unmatched.len(),
+            );
+            for c in &report.candidates {
+                println!("  {} -> {}", c.figma_name, c.legacy_key);
+            }
+            if !report.ambiguous.is_empty() {
+                println!(
+                    "ambiguous (multiple value matches with no clear winner, or a winner \
+                     that collided with another variable's pick):"
+                );
+                for name in &report.ambiguous {
+                    println!("  {name}");
+                }
+            }
+        }
+    }
+
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_figma_read(file_key: &str, token: &str, format: OutputFormat) -> miette::Result<ExitCode> {
+    let rt = tokio::runtime::Runtime::new().into_diagnostic()?;
+    let client = figma::api::FigmaClient::new(token.to_string());
+
+    let response = rt
+        .block_on(client.get_local_variables(file_key))
+        .map_err(|e| miette::miette!("{e}"))?;
+
+    match format {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&response.meta).into_diagnostic()?
+            );
+        }
+        OutputFormat::Pretty => {
+            let meta = &response.meta;
+            println!(
+                "{} collection(s), {} variable(s)\n",
+                meta.variable_collections.len(),
+                meta.variables.len()
+            );
+
+            for col_summary in figma::mapping::summarize_variables(meta) {
+                let col = &col_summary.collection;
+                let vars = &col_summary.variables;
+                let mode_names: Vec<&str> = col.modes.iter().map(|m| m.name.as_str()).collect();
+                println!(
+                    "Collection: \"{}\" ({} mode(s): {})",
+                    col.name,
+                    col.modes.len(),
+                    mode_names.join(", ")
+                );
+                println!("  Variables: {}", vars.len());
+                // Show first 5 samples.
+                for v in vars.iter().take(5) {
+                    println!("  Sample: {} [{}]", v.name, v.resolved_type);
+                }
+                if vars.len() > 5 {
+                    println!("  ... and {} more", vars.len() - 5);
+                }
+                println!();
+            }
+        }
+    }
+
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_primer(
+    explicit_path: Option<&Path>,
+    format: OutputFormat,
+    components_dir: Option<PathBuf>,
+    fields_dir: Option<PathBuf>,
+    mode_sets_dir: Option<PathBuf>,
+) -> miette::Result<ExitCode> {
+    let resolved = resolve_data_source(CliPathOverrides {
+        tokens_root: explicit_path.map(|p| p.to_path_buf()),
+        mode_sets: mode_sets_dir,
+        components: components_dir,
+        fields: fields_dir,
+        ..Default::default()
+    })?;
+
+    // Dataset path: explicit arg wins; otherwise use the resolved tokens root (which
+    // comes from the config source, embedded snapshot, or in-repo CWD probing).
+    let path = resolved.tokens_root.clone();
+    // Load graph (manifest is auto-loaded from tokens root by from_json_dir_with_*).
+    let graph = TokenGraph::open_cached_with_catalogs(
+        &path,
+        resolved.mode_sets.as_deref(),
+        resolved.components.as_deref(),
+    )
+    .into_diagnostic()
+    .wrap_err_with(|| format!("failed to load tokens from {}", path.display()))?;
+
+    // Load fields from disk (not threaded through the runtime cache path).
+    let graph = if let Some(dir) = &resolved.fields {
+        let fields = TokenGraph::load_spec_fields(dir).unwrap_or_default();
+        graph.with_fields(fields)
+    } else {
+        graph
+    };
+
+    let provenance = match &resolved.provenance {
+        data_source::Provenance::InRepo => serde_json::json!({ "source": "in-repo" }),
+        data_source::Provenance::Config { config_path } => serde_json::json!({
+            "source": "config",
+            "configPath": config_path.display().to_string(),
+        }),
+        data_source::Provenance::Cache { cache_dir } => serde_json::json!({
+            "source": "cache",
+            "cacheDir": cache_dir.display().to_string(),
+        }),
+        data_source::Provenance::Embedded { version } => serde_json::json!({
+            "source": "embedded",
+            "designDataVersion": version,
+        }),
+    };
+
+    let payload = primer::build(&graph, provenance);
+
+    match format {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&payload).into_diagnostic()?
+            );
+        }
+        OutputFormat::Pretty => {
+            let mode_set_summary: Vec<String> = payload
+                .mode_sets
+                .iter()
+                .map(|ms| {
+                    let mode_str = ms
+                        .modes
+                        .iter()
+                        .map(|m| {
+                            if m == &ms.default_mode {
+                                format!("{m}*")
+                            } else {
+                                m.clone()
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("|");
+                    format!("{} ({mode_str})", ms.name)
+                })
+                .collect();
+            const COMPONENT_PREVIEW_COUNT: usize = 8;
+            let comp_count = payload.components.len();
+            let comp_preview = if comp_count > COMPONENT_PREVIEW_COUNT {
+                format!(
+                    "{}, … and {} more",
+                    payload.components[..COMPONENT_PREVIEW_COUNT].join(", "),
+                    comp_count - COMPONENT_PREVIEW_COUNT
+                )
+            } else {
+                payload.components.join(", ")
+            };
+            println!("Spec version:  {}", primer::SPEC_VERSION);
+            println!("Token count:   {}", payload.token_count);
+            println!("Mode sets:     {}", mode_set_summary.join(", "));
+            println!("Components:    {comp_preview}");
+            println!("Platform ext.: {}", payload.platform_extensions.len());
+            println!("Fields:        {}", payload.taxonomy_fields.len());
+            println!(
+                "Manifest:      {}",
+                if payload.manifest.is_null() {
+                    "none"
+                } else {
+                    "present"
+                }
+            );
+        }
+    }
+
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_component(id: &str, components_dir: Option<PathBuf>) -> miette::Result<ExitCode> {
+    if let Err(msg) = design_data_core::component::validate_id(id) {
+        eprintln!("{msg}");
+        return Ok(ExitCode::from(1));
+    }
+
+    let components_dir_overridden = components_dir.is_some();
+    let resolved = resolve_data_source(CliPathOverrides {
+        components: components_dir,
+        ..Default::default()
+    })?;
+
+    // A selected platform manifest changes the catalog (extension components,
+    // implementation rows, replacements), so read through the cascade. Without
+    // one, or with an explicit --components-dir, keep the raw-file lookup.
+    if resolved.platform_manifest.is_some() && !components_dir_overridden {
+        let catalogs = manifest::load_merged_catalogs(&resolved)
+            .into_diagnostic()
+            .wrap_err("failed to apply platform manifest cascade")?;
+        return match catalogs.components.iter().find(|(name, _)| name == id) {
+            Some((_, doc)) => {
+                println!("{}", serde_json::to_string_pretty(doc).into_diagnostic()?);
+                Ok(ExitCode::SUCCESS)
+            }
+            None => {
+                let available: Vec<&str> = catalogs
+                    .components
+                    .iter()
+                    .map(|(name, _)| name.as_str())
+                    .collect();
+                eprintln!("Component '{id}' not found.");
+                eprintln!("Available components: {}", available.join(", "));
+                Ok(ExitCode::from(1))
+            }
+        };
+    }
+
+    let dir = resolved
+        .components
+        .ok_or_else(|| miette::miette!("could not locate components directory"))?;
+
+    match design_data_core::component::lookup(&dir, id).into_diagnostic()? {
+        Some(doc) => {
+            println!("{}", serde_json::to_string_pretty(&doc).into_diagnostic()?);
+            Ok(ExitCode::SUCCESS)
+        }
+        None => {
+            let available = design_data_core::component::list(&dir);
+            eprintln!("Component '{id}' not found.");
+            if available.is_empty() {
+                eprintln!("No components found in {}", dir.display());
+            } else {
+                eprintln!("Available components: {}", available.join(", "));
+            }
+            Ok(ExitCode::from(1))
+        }
+    }
+}
+
+/// `design-data catalog export --out DIR`: write the component and guideline
+/// catalogs after the selected platform manifest (if any) is applied, in the
+/// `components/*.json` + `guidelines/*.json` + `guidelines/manifest.json` layout.
+fn run_catalog_export(out: &Path) -> miette::Result<ExitCode> {
+    let resolved = resolve_data_source(CliPathOverrides::default())?;
+    let catalogs = manifest::load_merged_catalogs(&resolved)
+        .into_diagnostic()
+        .wrap_err("failed to apply platform manifest cascade")?;
+
+    let components_out = out.join("components");
+    let guidelines_out = out.join("guidelines");
+    std::fs::create_dir_all(&components_out).into_diagnostic()?;
+    std::fs::create_dir_all(&guidelines_out).into_diagnostic()?;
+    // Drop `.json` files from a previous export so reusing DIR can't leave
+    // components or guidelines behind that this cascade no longer contains.
+    for dir in [&components_out, &guidelines_out] {
+        for entry in std::fs::read_dir(dir).into_diagnostic()? {
+            let path = entry.into_diagnostic()?.path();
+            if path.extension().is_some_and(|ext| ext == "json") {
+                std::fs::remove_file(&path)
+                    .into_diagnostic()
+                    .wrap_err_with(|| format!("failed to remove stale {}", path.display()))?;
+            }
+        }
+    }
+    let write_json = |path: PathBuf, value: &serde_json::Value| -> miette::Result<()> {
+        std::fs::write(
+            &path,
+            serde_json::to_string_pretty(value).into_diagnostic()?,
+        )
+        .into_diagnostic()
+        .wrap_err_with(|| format!("failed to write {}", path.display()))
+    };
+
+    for (name, doc) in &catalogs.components {
+        write_json(components_out.join(format!("{name}.json")), doc)?;
+    }
+
+    // Start from the foundation guidelines manifest, then add or replace
+    // entries for platform-contributed documents.
+    let mut entries: Vec<serde_json::Value> = resolved
+        .guidelines
+        .as_ref()
+        .map(|dir| dir.join("manifest.json"))
+        .filter(|p| p.is_file())
+        .map(|p| -> miette::Result<Vec<serde_json::Value>> {
+            let text = std::fs::read_to_string(&p).into_diagnostic()?;
+            let parsed: serde_json::Value = serde_json::from_str(&text).into_diagnostic()?;
+            Ok(parsed
+                .get("guidelines")
+                .and_then(|g| g.as_array())
+                .cloned()
+                .unwrap_or_default())
+        })
+        .transpose()?
+        .unwrap_or_default();
+    for (name, doc, from_platform) in &catalogs.guidelines {
+        write_json(guidelines_out.join(format!("{name}.json")), doc)?;
+        if *from_platform {
+            let mut entry = serde_json::json!({
+                "slug": name,
+                "title": doc.get("title").cloned().unwrap_or_else(|| name.clone().into()),
+                "file": format!("guidelines/{name}.json"),
+            });
+            if let Some(category) = doc.get("category") {
+                entry["category"] = category.clone();
+            }
+            entries.retain(|e| e.get("slug").and_then(|s| s.as_str()) != Some(name));
+            entries.push(entry);
+        }
+    }
+    write_json(
+        guidelines_out.join("manifest.json"),
+        &serde_json::json!({ "guidelines": entries }),
+    )?;
+
+    println!(
+        "Exported {} component(s) and {} guideline(s) to {}",
+        catalogs.components.len(),
+        catalogs.guidelines.len(),
+        out.display()
+    );
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_suggest(
+    intent: &str,
+    path: Option<&Path>,
+    property: Option<&str>,
+    limit: usize,
+    format: OutputFormat,
+) -> miette::Result<ExitCode> {
+    let target = path
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let graph = TokenGraph::open_cached(&target)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("failed to load tokens from {}", target.display()))?;
+
+    let results = suggest::suggest(&graph, intent, property, limit);
+
+    if matches!(format, OutputFormat::Json) {
+        let json_vals: Vec<serde_json::Value> = results
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "token_name": r.display_name(),
+                    "token_uuid": r.token_uuid,
+                    "file": r.file.display().to_string(),
+                    "layer": serde_json::to_value(r.layer).unwrap_or_default(),
+                    "confidence": r.confidence,
+                    "name_object": r.name_object,
+                    "value": r.value,
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json_vals).into_diagnostic()?
+        );
+    } else if results.is_empty() {
+        println!("No matching tokens found for: {intent:?}");
+    } else {
+        println!("Suggestions for {:?} (top {}):", intent, results.len());
+        for (i, r) in results.iter().enumerate() {
+            println!(
+                "  {}. {} (confidence: {:.2})",
+                i + 1,
+                r.display_name(),
+                r.confidence
+            );
+            if let Some(v) = &r.value {
+                println!("     value: {v}");
+            }
+        }
+    }
+
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_cache_build(
+    explicit_path: Option<&Path>,
+    output: &Path,
+    mode_sets_path: Option<&Path>,
+    components_path: Option<&Path>,
+    fields_path: Option<&Path>,
+) -> miette::Result<ExitCode> {
+    // Resolve the dataset: explicit arg wins, else the canonical resolved root.
+    let resolved = resolve_data_source(CliPathOverrides {
+        tokens_root: explicit_path.map(|p| p.to_path_buf()),
+        mode_sets: mode_sets_path.map(|p| p.to_path_buf()),
+        components: components_path.map(|p| p.to_path_buf()),
+        fields: fields_path.map(|p| p.to_path_buf()),
+        ..Default::default()
+    })?;
+    let tokens_root = resolved.tokens_root;
+
+    cache::build_file_with_all_catalogs(
+        &tokens_root,
+        resolved.mode_sets.as_deref(),
+        resolved.components.as_deref(),
+        resolved.fields.as_deref(),
+        output,
+    )
+    .into_diagnostic()
+    .wrap_err_with(|| {
+        format!(
+            "failed to build cache from {} into {}",
+            tokens_root.display(),
+            output.display()
+        )
+    })?;
+
+    println!(
+        "Built cache from {} → {}",
+        tokens_root.display(),
+        output.display()
+    );
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_write(output: &Path, rationale: Option<&str>) -> miette::Result<ExitCode> {
+    let mut doc: serde_json::Value = if output.exists() {
+        let raw = std::fs::read_to_string(output)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("failed to read {}", output.display()))?;
+        serde_json::from_str(&raw)
+            .into_diagnostic()
+            .wrap_err("failed to parse existing product-context.json")?
+    } else {
+        let now = Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+        design_data_core::write::build_product_context_doc(
+            "product",
+            rationale,
+            primer::SPEC_VERSION,
+            &now,
+        )
+    };
+
+    if output.exists() {
+        design_data_core::write::merge_product_context_rationale(&mut doc, rationale);
+    }
+
+    if let Some(parent) = output.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .into_diagnostic()
+                .wrap_err_with(|| {
+                    format!("failed to create parent directory {}", parent.display())
+                })?;
+        }
+    }
+
+    let json = serde_json::to_string_pretty(&doc)
+        .into_diagnostic()
+        .wrap_err("failed to serialize product context")?;
+    std::fs::write(output, json + "\n")
+        .into_diagnostic()
+        .wrap_err_with(|| format!("failed to write {}", output.display()))?;
+
+    println!("Wrote {}", output.display());
+    Ok(ExitCode::SUCCESS)
+}
+
+struct WriteTokenOpts<'a> {
+    token_json: Option<&'a str>,
+    token_file: Option<&'a Path>,
+    product_context: Option<&'a Path>,
+    rationale: Option<&'a str>,
+    is_override: bool,
+    schema_path: Option<&'a Path>,
+}
+
+fn run_write_token(key: &str, target: &Path, opts: WriteTokenOpts<'_>) -> miette::Result<ExitCode> {
+    let WriteTokenOpts {
+        token_json,
+        token_file,
+        product_context,
+        rationale,
+        is_override,
+        schema_path,
+    } = opts;
+    let token: serde_json::Value = match (token_json, token_file) {
+        (Some(raw), _) => serde_json::from_str(raw)
+            .into_diagnostic()
+            .wrap_err("failed to parse --token-json")?,
+        (None, Some(path)) => {
+            let text = std::fs::read_to_string(path)
+                .into_diagnostic()
+                .wrap_err_with(|| format!("failed to read {}", path.display()))?;
+            serde_json::from_str(&text)
+                .into_diagnostic()
+                .wrap_err_with(|| format!("failed to parse {}", path.display()))?
+        }
+        (None, None) => {
+            return Err(miette::miette!(
+                "one of --token-json or --token-file is required"
+            ))
+        }
+    };
+
+    // Resolve schema directory: explicit flag → sibling of target → default relative path.
+    let schemas_dir = schema_path
+        .map(PathBuf::from)
+        .or_else(|| {
+            // Try target's parent up to repo root looking for packages/design-data-spec/schemas.
+            target.ancestors().find_map(|p| {
+                let candidate = p.join("packages/design-data-spec/schemas");
+                candidate.is_dir().then_some(candidate)
+            })
+        })
+        .ok_or_else(|| {
+            miette::miette!("cannot locate schemas directory; pass --schema-path explicitly")
+        })?;
+
+    let registry = SchemaRegistry::load_legacy_token_schemas(&schemas_dir)
+        .into_diagnostic()
+        .wrap_err("failed to load schema registry")?;
+
+    let result = write_token(
+        WriteTokenInput {
+            key: key.to_string(),
+            token,
+            target: target.to_path_buf(),
+            product_context: product_context.map(PathBuf::from),
+            rationale: rationale.map(str::to_string),
+            created_at: Some(Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()),
+            is_override,
+        },
+        &registry,
+    )
+    .into_diagnostic()
+    .wrap_err("write_token failed")?;
+
+    println!("Wrote token '{}' to {}", key, result.written_to.display());
+    if result.product_context_updated {
+        println!(
+            "Updated {}",
+            product_context
+                .map(|p| p.display().to_string())
+                .unwrap_or_default()
+        );
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Launch the interactive TUI from a set of parsed TUI arguments.
+fn run_tui(args: TuiArgs) -> ExitCode {
+    let opts = LaunchOptions {
+        dataset: args.dataset.unwrap_or_else(|| PathBuf::from(".")),
+        components: args.components,
+        mode_sets: args.mode_sets,
+        allow_write: args.allow_write,
+        theme: args.theme,
+        no_resume_wizard: args.no_resume_wizard,
+        record: args.record,
+        replay: args.replay,
+        snapshot_ansi: args.snapshot_ansi,
+        platform_id: GLOBAL_PLATFORM_ID.get().cloned().flatten(),
+    };
+    match design_data_tui::launch(opts) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("Error: {e:?}");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn main() -> ExitCode {
+    let cli = Cli::parse();
+    GLOBAL_PLATFORM_ID
+        .set(cli.platform.clone())
+        .expect("main runs exactly once; GLOBAL_PLATFORM_ID is set exactly once here");
+
+    // Bare invocation (no subcommand) or explicit `tui` subcommand → launch the TUI.
+    let command = match cli.command {
+        None => return run_tui(cli.tui),
+        Some(Commands::Tui(args)) => return run_tui(args),
+        Some(other) => other,
+    };
+
+    let result = match command {
+        Commands::Platform { sub } => match sub {
+            PlatformSub::List { format } => run_platform_list(format),
+            PlatformSub::Show { id, format } => run_platform_show(&id, format),
+            PlatformSub::Eject {
+                id,
+                out,
+                with_consumer_smoke,
+            } => run_platform_eject(&id, out, with_consumer_smoke),
+        },
+        Commands::Validate {
+            path,
+            format,
+            schema_path,
+            exceptions_path,
+            mode_sets_path,
+            components_path,
+            relationships_path,
+            visuals_path,
+            icons_path,
+            names_dir,
+            components_report_only,
+            strict,
+        } => run_validate(
+            path.as_deref(),
+            ValidateOpts {
+                format,
+                schema_path,
+                exceptions_path,
+                mode_sets_path,
+                components_path,
+                relationships_path,
+                visuals_path,
+                icons_path,
+                names_dir,
+                components_report_only,
+                strict,
+            },
+        ),
+        Commands::ValidateDataset {
+            path,
+            format,
+            schema_path,
+            spec_schemas,
+            exceptions_path,
+            strict,
+        } => {
+            let target = path.unwrap_or_else(|| PathBuf::from("."));
+            run_validate_dataset(
+                &target,
+                ValidateDatasetOpts {
+                    format,
+                    schema_path,
+                    spec_schemas,
+                    exceptions_path,
+                    strict,
+                },
+            )
+        }
+        Commands::ValidateManifest {
+            path,
+            manifest,
+            format,
+        } => run_validate_manifest(path.as_deref(), manifest, format),
+        Commands::Site {
+            out,
+            components,
+            visuals_path,
+            path,
+            text_metrics,
+            engine,
+            data_only,
+        } => run_site(
+            out,
+            components,
+            path,
+            visuals_path,
+            text_metrics,
+            engine,
+            data_only,
+        ),
+        Commands::AnatomySuggest {
+            components,
+            format,
+            path,
+        } => run_anatomy_suggest(components, format, path),
+        Commands::RenderCompare {
+            scenes,
+            measured,
+            tolerances,
+            format,
+            output,
+            fail_on_diff,
+        } => render_batch::run_compare(
+            &scenes,
+            &measured,
+            tolerances,
+            &format,
+            output,
+            fail_on_diff,
+        ),
+        Commands::Render {
+            component,
+            batch,
+            out,
+            size,
+            states,
+            options,
+            color_scheme,
+            scale,
+            label,
+            width,
+            icon,
+            visuals_path,
+            path,
+            format,
+            output,
+            text_metrics,
+        } => run_render(
+            component,
+            batch,
+            out,
+            size,
+            states,
+            options,
+            color_scheme,
+            scale,
+            label,
+            width,
+            icon,
+            visuals_path,
+            path,
+            format,
+            output,
+            text_metrics,
+        ),
+        Commands::SpecSheet {
+            component,
+            all,
+            size,
+            changelog,
+            changelog_dir,
+            path,
+            output,
+            text_metrics,
+            svg,
+        } => spec_sheet::run(
+            component,
+            all,
+            size,
+            changelog,
+            changelog_dir,
+            path,
+            output,
+            text_metrics,
+            svg,
+        ),
+        Commands::Changelog {
+            from,
+            to,
+            component,
+            dataset,
+            release,
+            tags,
+        } => changelog::run(changelog::Args {
+            from,
+            to,
+            component,
+            dataset,
+            release,
+            tags,
+        }),
+        Commands::Resolve {
+            property,
+            path,
+            mode_sets_path,
+            color_scheme,
+            scale,
+            contrast,
+            format,
+        } => run_resolve(
+            &property,
+            path.as_deref(),
+            mode_sets_path,
+            color_scheme,
+            scale,
+            contrast,
+            format,
+        ),
+        Commands::DecomposeLegacyName {
+            slug,
+            component_hint,
+        } => run_decompose_legacy_name(&slug, component_hint.as_deref()),
+        Commands::DumpLegacyKeys { path } => run_dump_legacy_keys(path.as_deref()),
+        Commands::Diff {
+            old,
+            new,
+            format,
+            filter,
+        } => run_diff(&old, &new, format, filter.as_deref()),
+        Commands::Query {
+            path,
+            filter,
+            format,
+            count,
+            color_scheme,
+            scale,
+            contrast,
+        } => run_query(
+            path.as_deref(),
+            &filter,
+            format,
+            count,
+            color_scheme,
+            scale,
+            contrast,
+        ),
+        Commands::Export {
+            path,
+            mode_sets_path,
+            color_scheme,
+            scale,
+            contrast,
+            format,
+        } => run_export(
+            path.as_deref(),
+            mode_sets_path,
+            color_scheme,
+            scale,
+            contrast,
+            format,
+        ),
+        Commands::Migrate { sub } => match sub {
+            MigrateSub::Verify {
+                path,
+                snapshot,
+                schema_path,
+                exceptions_path,
+            } => run_migrate_verify(&path, &snapshot, schema_path, exceptions_path),
+            MigrateSub::Snapshot {
+                path,
+                output,
+                schema_path,
+                exceptions_path,
+            } => run_migrate_snapshot(&path, &output, schema_path, exceptions_path),
+            MigrateSub::Convert {
+                input,
+                output,
+                names_dir,
+                exceptions,
+            } => run_migrate_convert(&input, &output, names_dir.as_deref(), exceptions.as_deref()),
+            MigrateSub::LegacyOutput { input, output } => {
+                run_migrate_legacy_output(&input, &output)
+            }
+            MigrateSub::LegacyOutputCascaded { path, output } => {
+                run_migrate_legacy_output_cascaded(path.as_deref(), &output)
+            }
+            MigrateSub::AddUuids { dir } => run_migrate_add_uuids(&dir),
+            MigrateSub::RoundtripVerify { path } => run_migrate_roundtrip_verify(&path),
+            MigrateSub::LegacyVerify {
+                cascade_dir,
+                reference,
+            } => run_migrate_legacy_verify(&cascade_dir, &reference),
+        },
+        Commands::Figma { sub } => match sub {
+            FigmaSub::Read {
+                file_key,
+                token,
+                format,
+            } => run_figma_read(&file_key, &token, format),
+            FigmaSub::Export {
+                path,
+                file_key,
+                token,
+                mapping,
+                manifest,
+                code_syntax_manifests,
+                redirect_deprecated,
+                modeless_layer,
+                no_folder_prefix,
+                write_options,
+            } => run_figma_export(
+                path.as_deref(),
+                &file_key,
+                &token,
+                mapping.as_deref(),
+                manifest.as_deref(),
+                &code_syntax_manifests,
+                redirect_deprecated,
+                modeless_layer,
+                no_folder_prefix,
+                &write_options,
+            ),
+            FigmaSub::Import {
+                path,
+                file_key,
+                token,
+                manifest,
+                mapping,
+                out,
+            } => run_figma_import(
+                &path,
+                &file_key,
+                &token,
+                &manifest,
+                mapping.as_deref(),
+                out.as_deref(),
+            ),
+            FigmaSub::Audit {
+                snapshot,
+                token_dir,
+                no_folder_prefix,
+                format,
+            } => run_figma_audit(&snapshot, token_dir.as_deref(), no_folder_prefix, format),
+            FigmaSub::PublicNames {
+                snapshot,
+                csv,
+                markdown,
+                format,
+            } => run_figma_public_names(&snapshot, csv.as_deref(), markdown.as_deref(), format),
+            FigmaSub::Diff {
+                file_key,
+                token,
+                snapshot,
+                mapping,
+                manifest,
+                no_folder_prefix,
+                format,
+            } => run_figma_diff(
+                file_key.as_deref(),
+                token.as_deref(),
+                snapshot.as_deref(),
+                mapping.as_deref(),
+                manifest.as_deref(),
+                no_folder_prefix,
+                format,
+            ),
+            FigmaSub::Pair {
+                file_key,
+                token,
+                snapshot,
+                mapping,
+                manifest,
+                format,
+            } => run_figma_pair(
+                file_key.as_deref(),
+                token.as_deref(),
+                snapshot.as_deref(),
+                mapping.as_deref(),
+                manifest.as_deref(),
+                format,
+            ),
+        },
+        Commands::Primer {
+            path,
+            format,
+            components_dir,
+            fields_dir,
+            mode_sets_dir,
+        } => run_primer(
+            path.as_deref(),
+            format,
+            components_dir,
+            fields_dir,
+            mode_sets_dir,
+        ),
+        Commands::Component { id, components_dir } => run_component(&id, components_dir),
+        Commands::Catalog { sub } => match sub {
+            CatalogSub::Export { out } => run_catalog_export(&out),
+        },
+        Commands::Suggest {
+            intent,
+            path,
+            property,
+            limit,
+            format,
+        } => run_suggest(&intent, path.as_deref(), property.as_deref(), limit, format),
+        Commands::Write { output, rationale } => run_write(&output, rationale.as_deref()),
+        Commands::WriteToken {
+            key,
+            token_json,
+            token_file,
+            target,
+            product_context,
+            rationale,
+            is_override,
+            schema_path,
+        } => run_write_token(
+            &key,
+            &target,
+            WriteTokenOpts {
+                token_json: token_json.as_deref(),
+                token_file: token_file.as_deref(),
+                product_context: product_context.as_deref(),
+                rationale: rationale.as_deref(),
+                is_override,
+                schema_path: schema_path.as_deref(),
+            },
+        ),
+        Commands::CacheBuild {
+            path,
+            output,
+            mode_sets_path,
+            components_path,
+            fields_path,
+        } => run_cache_build(
+            path.as_deref(),
+            &output,
+            mode_sets_path.as_deref(),
+            components_path.as_deref(),
+            fields_path.as_deref(),
+        ),
+        Commands::AuthoringSession { cmd } => {
+            return authoring::run(cmd);
+        }
+        Commands::Lifecycle { cmd } => {
+            return lifecycle::run_lifecycle(cmd);
+        }
+        Commands::ModeSet { cmd } => {
+            return lifecycle::run_mode_set(cmd);
+        }
+        Commands::Data { cmd } => {
+            return data::run(cmd);
+        }
+        Commands::Tui(_) => unreachable!("handled above"),
+    };
+
+    match result {
+        Ok(code) => code,
+        Err(e) => {
+            eprintln!("Error: {e:?}");
+            ExitCode::from(2)
+        }
+    }
+}

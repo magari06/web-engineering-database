@@ -1,0 +1,930 @@
+# [**@adobe/spectrum-component-api-schemas**](https://github.com/adobe/spectrum-component-api-schemas)
+
+## 6.1.73
+
+### Patch Changes
+
+- Updated dependencies [[`31332b8`](https://github.com/adobe/spectrum-design-data/commit/31332b8ab5b9a8987e8670c9dabd6262408fa7b1)]:
+  - @adobe/spectrum-design-data@3.9.2
+
+## 6.1.72
+
+### Patch Changes
+
+- Updated dependencies [[`c223628`](https://github.com/adobe/spectrum-design-data/commit/c2236288e5cfa47bfe9f4099abb24d03f7c10acf)]:
+  - @adobe/spectrum-design-data@3.9.1
+
+## 6.1.71
+
+### Patch Changes
+
+- Updated dependencies [[`176277a`](https://github.com/adobe/spectrum-design-data/commit/176277ae913a94b5985b150bf715bceeb684a96d), [`f65e062`](https://github.com/adobe/spectrum-design-data/commit/f65e0628d3e1e4adfde7c98439075e19e8382989), [`c3f714b`](https://github.com/adobe/spectrum-design-data/commit/c3f714bd2543fd7a623b6d4c00d755fe073c63c8), [`160dcb0`](https://github.com/adobe/spectrum-design-data/commit/160dcb099128afc1574ec9c7fdab5df28526eb53), [`dd30d97`](https://github.com/adobe/spectrum-design-data/commit/dd30d97159cb02c9efe6cdd916c2faf5795fb9c1), [`4887473`](https://github.com/adobe/spectrum-design-data/commit/4887473689907243213225da695cc7944f9f0dfc), [`6080645`](https://github.com/adobe/spectrum-design-data/commit/608064534fc01696964d3dae7f09d61bd7dac29e)]:
+  - @adobe/spectrum-design-data@3.9.0
+
+## 6.1.70
+
+### Patch Changes
+
+- Updated dependencies [[`13f4851`](https://github.com/adobe/spectrum-design-data/commit/13f4851adab6c4e01ef3299cafb8c156bcfdfa19)]:
+  - @adobe/spectrum-design-data@3.8.2
+
+## 6.1.69
+
+### Patch Changes
+
+- Updated dependencies [[`c4f6c2a`](https://github.com/adobe/spectrum-design-data/commit/c4f6c2abbbd7754deaf87c84bb4e3067364db9eb)]:
+  - @adobe/spectrum-design-data@3.8.1
+
+## 6.1.68
+
+### Patch Changes
+
+- Updated dependencies [[`326c51f`](https://github.com/adobe/spectrum-design-data/commit/326c51f09306fb0cc5fe493ec66ae89cb0f878ff), [`21c4d24`](https://github.com/adobe/spectrum-design-data/commit/21c4d240453333a8830c68a2e0afc4b18e9403b0), [`9b4ad35`](https://github.com/adobe/spectrum-design-data/commit/9b4ad35c29fb00193e5847625699afb04fa0c560), [`9b4ad35`](https://github.com/adobe/spectrum-design-data/commit/9b4ad35c29fb00193e5847625699afb04fa0c560), [`9b4ad35`](https://github.com/adobe/spectrum-design-data/commit/9b4ad35c29fb00193e5847625699afb04fa0c560), [`7b38617`](https://github.com/adobe/spectrum-design-data/commit/7b38617df24442d22724fb890cef69aa198b9e3a), [`9b4ad35`](https://github.com/adobe/spectrum-design-data/commit/9b4ad35c29fb00193e5847625699afb04fa0c560), [`9b4ad35`](https://github.com/adobe/spectrum-design-data/commit/9b4ad35c29fb00193e5847625699afb04fa0c560), [`9b4ad35`](https://github.com/adobe/spectrum-design-data/commit/9b4ad35c29fb00193e5847625699afb04fa0c560), [`4be4b79`](https://github.com/adobe/spectrum-design-data/commit/4be4b79699b7926bd59a71b3c145c673fe1bc5f2), [`2ec8e9e`](https://github.com/adobe/spectrum-design-data/commit/2ec8e9ed217a01bb81eefe8b1950be79e81cf98d), [`9b4ad35`](https://github.com/adobe/spectrum-design-data/commit/9b4ad35c29fb00193e5847625699afb04fa0c560)]:
+  - @adobe/spectrum-design-data@3.8.0
+
+## 6.1.67
+
+### Patch Changes
+
+- Updated dependencies [[`a60aeea`](https://github.com/adobe/spectrum-design-data/commit/a60aeea243b2ac4e812d46bbd9f7140c9f62f398)]:
+  - @adobe/spectrum-design-data@3.7.1
+
+## 6.1.66
+
+### Patch Changes
+
+- Updated dependencies [[`be208ce`](https://github.com/adobe/spectrum-design-data/commit/be208cef23415ab779adbc49e2fcf7c9fdeca9b1), [`21841d7`](https://github.com/adobe/spectrum-design-data/commit/21841d7f5712234eb9b9280d6bc75205114f6870)]:
+  - @adobe/spectrum-design-data@3.7.0
+
+## 6.1.65
+
+### Patch Changes
+
+- Updated dependencies [[`18431aa`](https://github.com/adobe/spectrum-design-data/commit/18431aa6bb40fee2838030592940195c42a6a1d4)]:
+  - @adobe/spectrum-design-data@3.6.1
+
+## 6.1.64
+
+### Patch Changes
+
+- Updated dependencies [[`54ee322`](https://github.com/adobe/spectrum-design-data/commit/54ee322dc2fa9c6556549597a74610c290638664), [`15f371e`](https://github.com/adobe/spectrum-design-data/commit/15f371e50e2ce95a624a93152e408e1bbe8844dc)]:
+  - @adobe/spectrum-design-data@3.6.0
+
+## 6.1.63
+
+### Patch Changes
+
+- Updated dependencies [[`418cc0d`](https://github.com/adobe/spectrum-design-data/commit/418cc0d4b95e3b6b7cc70779e55d09173c88c357), [`6375e4b`](https://github.com/adobe/spectrum-design-data/commit/6375e4b83333f51f012d8f95df35a20d8a792340)]:
+  - @adobe/spectrum-design-data@3.5.0
+
+## 6.1.62
+
+### Patch Changes
+
+- Updated dependencies [[`e693b15`](https://github.com/adobe/spectrum-design-data/commit/e693b15fb1d233b6f70aed2a85532afdf949c8eb), [`ec3376f`](https://github.com/adobe/spectrum-design-data/commit/ec3376fa833f2c31dd0b2340590134b2747b00c4)]:
+  - @adobe/spectrum-design-data@3.4.0
+
+## 6.1.61
+
+### Patch Changes
+
+- Updated dependencies [[`b9888b8`](https://github.com/adobe/spectrum-design-data/commit/b9888b8ce9a0e4ec5b607e088942999629d5d43d), [`9d3a14f`](https://github.com/adobe/spectrum-design-data/commit/9d3a14fb4c7ed956f93b87ccee6565c73b940ed5)]:
+  - @adobe/spectrum-design-data@3.3.0
+
+## 6.1.60
+
+### Patch Changes
+
+- Updated dependencies [[`132e66c`](https://github.com/adobe/spectrum-design-data/commit/132e66c541eaf4749d6e1b199705f8feb5621b56)]:
+  - @adobe/spectrum-design-data@3.2.5
+
+## 6.1.59
+
+### Patch Changes
+
+- Updated dependencies [[`a6b8360`](https://github.com/adobe/spectrum-design-data/commit/a6b83605ff76405d4de830169ab5101b04eb788c)]:
+  - @adobe/spectrum-design-data@3.2.4
+
+## 6.1.58
+
+### Patch Changes
+
+- Updated dependencies [[`d88be4e`](https://github.com/adobe/spectrum-design-data/commit/d88be4e0204abb31d9f02ce680acd0fe478057a7)]:
+  - @adobe/spectrum-design-data@3.2.3
+
+## 6.1.57
+
+### Patch Changes
+
+- Updated dependencies [[`63daf55`](https://github.com/adobe/spectrum-design-data/commit/63daf55e40fe469dc1b30248e57df7664afa005a)]:
+  - @adobe/spectrum-design-data@3.2.2
+
+## 6.1.56
+
+### Patch Changes
+
+- Updated dependencies [[`009ccdd`](https://github.com/adobe/spectrum-design-data/commit/009ccdd50f5e73ee7cb2d25658797e6b2e19efd5)]:
+  - @adobe/spectrum-design-data@3.2.1
+
+## 6.1.55
+
+### Patch Changes
+
+- Updated dependencies [[`e357170`](https://github.com/adobe/spectrum-design-data/commit/e3571706e0aba86418b7d97c3986684c8159775c)]:
+  - @adobe/spectrum-design-data@3.2.0
+
+## 6.1.54
+
+### Patch Changes
+
+- Updated dependencies [[`905bc1d`](https://github.com/adobe/spectrum-design-data/commit/905bc1d31e059349767bd4f9faf0deb4d4893ebe)]:
+  - @adobe/spectrum-design-data@3.1.0
+
+## 6.1.53
+
+### Patch Changes
+
+- Updated dependencies [[`6005339`](https://github.com/adobe/spectrum-design-data/commit/6005339a0678226eee3e827fd5bbfa793f5bccc7)]:
+  - @adobe/spectrum-design-data@3.0.0
+
+## 6.1.52
+
+### Patch Changes
+
+- Updated dependencies [[`936b203`](https://github.com/adobe/spectrum-design-data/commit/936b20300349220b9d8f30baf8f592b929d847c6), [`5e22a7a`](https://github.com/adobe/spectrum-design-data/commit/5e22a7a18cd1a4f2a5957cba9cafa66bef73ed63)]:
+  - @adobe/spectrum-design-data@2.7.0
+
+## 6.1.51
+
+### Patch Changes
+
+- Updated dependencies [[`7f7b1d4`](https://github.com/adobe/spectrum-design-data/commit/7f7b1d465d7280551fffc8a3ab2b66132c50a1b8), [`9acf536`](https://github.com/adobe/spectrum-design-data/commit/9acf53640c3e02a4efdf38aba81b1f087666d8f9), [`7cc6005`](https://github.com/adobe/spectrum-design-data/commit/7cc600534a0cd5666b0b82d2b99731c5d6ef9b4f), [`b09aa84`](https://github.com/adobe/spectrum-design-data/commit/b09aa84a062456b3ae875b40053792e057a74c6a), [`715bc9d`](https://github.com/adobe/spectrum-design-data/commit/715bc9d19da54eb39a3397bba3bca8cb0149a38c), [`294486e`](https://github.com/adobe/spectrum-design-data/commit/294486e8c753c69b4786fb7d6cdbcb09fde606f9), [`1750f5d`](https://github.com/adobe/spectrum-design-data/commit/1750f5d1bcc4db52a64bb7d4c68eb2addb175587)]:
+  - @adobe/spectrum-design-data@2.6.0
+
+## 6.1.50
+
+### Patch Changes
+
+- Updated dependencies [[`11e8084`](https://github.com/adobe/spectrum-design-data/commit/11e8084a80d68a7a08ac5f02a04e389485f37772), [`ac24aa5`](https://github.com/adobe/spectrum-design-data/commit/ac24aa5c754c11fdb236baf8d43f91eed0d3acc5), [`c23cc54`](https://github.com/adobe/spectrum-design-data/commit/c23cc5457a50e3253ce57a7e04d93e92f20300a1), [`11e8084`](https://github.com/adobe/spectrum-design-data/commit/11e8084a80d68a7a08ac5f02a04e389485f37772), [`11e8084`](https://github.com/adobe/spectrum-design-data/commit/11e8084a80d68a7a08ac5f02a04e389485f37772)]:
+  - @adobe/spectrum-design-data@2.5.0
+
+## 6.1.49
+
+### Patch Changes
+
+- Updated dependencies [[`05e89b2`](https://github.com/adobe/spectrum-design-data/commit/05e89b2a6c440837de12362b24a526b9f160d7f4), [`f122a90`](https://github.com/adobe/spectrum-design-data/commit/f122a901858ca1ed3d833e934b8c94197534b22f), [`13ec65c`](https://github.com/adobe/spectrum-design-data/commit/13ec65cd489c0cdb75258c071e3d6e6fa743b20d)]:
+  - @adobe/spectrum-design-data@2.4.0
+
+## 6.1.48
+
+### Patch Changes
+
+- Updated dependencies [[`63d0ef4`](https://github.com/adobe/spectrum-design-data/commit/63d0ef4a7d82db80caf6229dac55c9d820443927)]:
+  - @adobe/spectrum-design-data@2.3.1
+
+## 6.1.47
+
+### Patch Changes
+
+- Updated dependencies [[`6d070af`](https://github.com/adobe/spectrum-design-data/commit/6d070af0f289fc18d23b7406ed23bc606ccc7e65)]:
+  - @adobe/spectrum-design-data@2.3.0
+
+## 6.1.46
+
+### Patch Changes
+
+- Updated dependencies [[`9c697cf`](https://github.com/adobe/spectrum-design-data/commit/9c697cfcee3820ddc7bc3688ea000552de708641)]:
+  - @adobe/spectrum-design-data@2.2.0
+
+## 6.1.45
+
+### Patch Changes
+
+- Updated dependencies [[`0b2d328`](https://github.com/adobe/spectrum-design-data/commit/0b2d328b9dbfe7adf3cb762853faa15a4ba92dd0)]:
+  - @adobe/spectrum-design-data@2.1.1
+
+## 6.1.44
+
+### Patch Changes
+
+- Updated dependencies [[`afbadb2`](https://github.com/adobe/spectrum-design-data/commit/afbadb23a3ddd75640777909cdf97b849fc0daa7)]:
+  - @adobe/spectrum-design-data@2.1.0
+
+## 6.1.43
+
+### Patch Changes
+
+- Updated dependencies [[`6ef9247`](https://github.com/adobe/spectrum-design-data/commit/6ef9247f997dc34c2eea54f12bc9c9a4cbcda2df), [`fe338ee`](https://github.com/adobe/spectrum-design-data/commit/fe338ee9143b3fa95dc045ac43b3a0b9e5934af2), [`b879343`](https://github.com/adobe/spectrum-design-data/commit/b8793437edeb815c960263de896b9c56b79aa6c5), [`d35aea8`](https://github.com/adobe/spectrum-design-data/commit/d35aea805d1315d294f312c7bedba4de3edaf2ae), [`6ef9247`](https://github.com/adobe/spectrum-design-data/commit/6ef9247f997dc34c2eea54f12bc9c9a4cbcda2df)]:
+  - @adobe/spectrum-design-data@2.0.0
+
+## 6.1.42
+
+### Patch Changes
+
+- Updated dependencies [[`f7f8bef`](https://github.com/adobe/spectrum-design-data/commit/f7f8beff6b82d9431c17a84e8286677aa3e27e61)]:
+  - @adobe/spectrum-design-data@1.0.3
+
+## 6.1.41
+
+### Patch Changes
+
+- Updated dependencies [[`3f5f00f`](https://github.com/adobe/spectrum-design-data/commit/3f5f00fe724257099316e33d608305fe86e1fffa)]:
+  - @adobe/spectrum-design-data@1.0.2
+
+## 6.1.40
+
+### Patch Changes
+
+- Updated dependencies [[`3862608`](https://github.com/adobe/spectrum-design-data/commit/3862608509174f10e92d3c90aeae29f2fe9a4769), [`3f91a83`](https://github.com/adobe/spectrum-design-data/commit/3f91a8388a0fb0675721d1eebbd747c83fadba8e), [`3862608`](https://github.com/adobe/spectrum-design-data/commit/3862608509174f10e92d3c90aeae29f2fe9a4769), [`1d9a3b3`](https://github.com/adobe/spectrum-design-data/commit/1d9a3b36ad03dd772f4fd1f3db93a38538404b94), [`3862608`](https://github.com/adobe/spectrum-design-data/commit/3862608509174f10e92d3c90aeae29f2fe9a4769), [`4358f73`](https://github.com/adobe/spectrum-design-data/commit/4358f736dfe999f786af618c7395a2596ac1baf7)]:
+  - @adobe/spectrum-design-data@1.0.1
+
+## 6.1.39
+
+### Patch Changes
+
+- Updated dependencies [[`50d0ffe`](https://github.com/adobe/spectrum-design-data/commit/50d0ffe75b7303bea6b113877b7e559fd4a985de)]:
+  - @adobe/spectrum-design-data@1.0.0
+
+## 6.1.38
+
+### Patch Changes
+
+- Updated dependencies [[`2065df4`](https://github.com/adobe/spectrum-design-data/commit/2065df4d9703daa92065579976546d64561f25f7)]:
+  - @adobe/spectrum-design-data@0.17.0
+
+## 6.1.37
+
+### Patch Changes
+
+- Updated dependencies [[`51ceb0b`](https://github.com/adobe/spectrum-design-data/commit/51ceb0bce5744858549ef5157ec44f3857ecd2b7)]:
+  - @adobe/spectrum-design-data@0.16.3
+
+## 6.1.36
+
+### Patch Changes
+
+- Updated dependencies [[`a869f46`](https://github.com/adobe/spectrum-design-data/commit/a869f46db5a6e2a1d2d10fddcd96a95a6acdf4a9), [`a869f46`](https://github.com/adobe/spectrum-design-data/commit/a869f46db5a6e2a1d2d10fddcd96a95a6acdf4a9)]:
+  - @adobe/spectrum-design-data@0.16.2
+
+## 6.1.35
+
+### Patch Changes
+
+- Updated dependencies [[`3b7af28`](https://github.com/adobe/spectrum-design-data/commit/3b7af28c5bb071ac4f0374d2efa0dfbc03cd76ee)]:
+  - @adobe/spectrum-design-data@0.16.1
+
+## 6.1.34
+
+### Patch Changes
+
+- Updated dependencies [[`5684c8a`](https://github.com/adobe/spectrum-design-data/commit/5684c8afbf34fc391717fdb975699e06eb677a4e), [`018f18e`](https://github.com/adobe/spectrum-design-data/commit/018f18e4175e4058fee2ad8f7678c8b07bd278c8)]:
+  - @adobe/spectrum-design-data@0.16.0
+
+## 6.1.33
+
+### Patch Changes
+
+- Updated dependencies [[`fb94215`](https://github.com/adobe/spectrum-design-data/commit/fb942159265526230b069ffd38f6f52590979582), [`2f1c008`](https://github.com/adobe/spectrum-design-data/commit/2f1c0088309739e4a8c7d8aa5bba24da8833d7d4), [`49fd896`](https://github.com/adobe/spectrum-design-data/commit/49fd8968146f9c0fd6acb95e004d00f1df66731e)]:
+  - @adobe/spectrum-design-data@0.15.0
+
+## 6.1.32
+
+### Patch Changes
+
+- Updated dependencies [[`b3d1803`](https://github.com/adobe/spectrum-design-data/commit/b3d1803e4c3bb0c3189525d6683571fcc8ce2b1b), [`fe842e9`](https://github.com/adobe/spectrum-design-data/commit/fe842e99a4f95ee4bac624ad956cd06dde170b97)]:
+  - @adobe/spectrum-design-data@0.14.2
+
+## 6.1.31
+
+### Patch Changes
+
+- Updated dependencies [[`d3c2323`](https://github.com/adobe/spectrum-design-data/commit/d3c23237f90cfa8053bd6949b06c5d88fe270c9e)]:
+  - @adobe/spectrum-design-data@0.14.1
+
+## 6.1.30
+
+### Patch Changes
+
+- Updated dependencies [[`555f25d`](https://github.com/adobe/spectrum-design-data/commit/555f25d6dcba8a5e8918039f2bab2020b8cf72c7)]:
+  - @adobe/spectrum-design-data@0.14.0
+
+## 6.1.29
+
+### Patch Changes
+
+- Updated dependencies [[`e0c0411`](https://github.com/adobe/spectrum-design-data/commit/e0c0411f6242d1ba4a3972d4fad6084f069a4439), [`e6c8cd4`](https://github.com/adobe/spectrum-design-data/commit/e6c8cd4b8ef5bb7e6cf1245f6eeb89cdd9d01693), [`cd5c385`](https://github.com/adobe/spectrum-design-data/commit/cd5c385487d58c0615b432ca6c07c42c00975fa6), [`2f59ddf`](https://github.com/adobe/spectrum-design-data/commit/2f59ddf14bdc0a46741e0d00ffc1ab281ef445e6), [`d9bdf1c`](https://github.com/adobe/spectrum-design-data/commit/d9bdf1c4ac3211d1c0916265e0f5c24ee090b990), [`47a35e9`](https://github.com/adobe/spectrum-design-data/commit/47a35e97708f4e9e793a011c6e2ad01bf4e523f4), [`7573ed3`](https://github.com/adobe/spectrum-design-data/commit/7573ed3a243470e549bfcec672f3729a91b2710a), [`cb762ce`](https://github.com/adobe/spectrum-design-data/commit/cb762ce98de91253b4d52b8e694886a5d52c4926), [`7dfc335`](https://github.com/adobe/spectrum-design-data/commit/7dfc33565899295084de1eef40e72763673f8810), [`d1dc7cc`](https://github.com/adobe/spectrum-design-data/commit/d1dc7cce646b1fa50fa07a3fe4a488911101922c), [`c9fab75`](https://github.com/adobe/spectrum-design-data/commit/c9fab753d8779f4c83f0a054bc30accde0184c0f), [`10c04a0`](https://github.com/adobe/spectrum-design-data/commit/10c04a0e33626009c538f4073f3e1d75939f0760), [`92ad1bf`](https://github.com/adobe/spectrum-design-data/commit/92ad1bfd3f93fa8b946de37f495be8fa6e8ce531), [`c591174`](https://github.com/adobe/spectrum-design-data/commit/c591174961dc3837b3f0f5d8ab95e65157a89cf9)]:
+  - @adobe/spectrum-design-data@0.13.0
+
+## 6.1.28
+
+### Patch Changes
+
+- Updated dependencies [[`6717f58`](https://github.com/adobe/spectrum-design-data/commit/6717f58d3c0e6ed756d15a540e0482155e23f624)]:
+  - @adobe/spectrum-design-data@0.12.0
+
+## 6.1.27
+
+### Patch Changes
+
+- Updated dependencies [[`f9f339c`](https://github.com/adobe/spectrum-design-data/commit/f9f339cabb15ecc27170c7230a9d5f7fdafea00c)]:
+  - @adobe/spectrum-design-data@0.11.0
+
+## 6.1.26
+
+### Patch Changes
+
+- Updated dependencies [[`a214eba`](https://github.com/adobe/spectrum-design-data/commit/a214eba18b230b24cbf99f0ca05cebbd70bb83b5), [`e6a8046`](https://github.com/adobe/spectrum-design-data/commit/e6a80463a9fc5603afaf14898e015056816f3670)]:
+  - @adobe/spectrum-design-data@0.10.0
+
+## 6.1.25
+
+### Patch Changes
+
+- Updated dependencies [[`e77c2b3`](https://github.com/adobe/spectrum-design-data/commit/e77c2b3519e75a07815c2905ac0bd0d7bef042c2), [`555047a`](https://github.com/adobe/spectrum-design-data/commit/555047a1c54366342a3a1fc550918b14cb3d5820), [`84c3f09`](https://github.com/adobe/spectrum-design-data/commit/84c3f09d7b48744c24d45e63ecba7f07cc94e5fd), [`14d3b48`](https://github.com/adobe/spectrum-design-data/commit/14d3b48b7efd80f06f42587b05b230fa2f353a6e), [`519c444`](https://github.com/adobe/spectrum-design-data/commit/519c4443474e01f807f383fc482cabe30fa1a456), [`9f5401f`](https://github.com/adobe/spectrum-design-data/commit/9f5401f1281932e7efff0bcbdbc50f69d2f3fea5), [`204d1ad`](https://github.com/adobe/spectrum-design-data/commit/204d1ad43300d516d75e384509c33b480342b217), [`46449db`](https://github.com/adobe/spectrum-design-data/commit/46449dbcbdbeffb256fb857d3f878b8b376ccb91), [`b97a7ef`](https://github.com/adobe/spectrum-design-data/commit/b97a7ef5a205969f83eeca421e75983b8b214a72), [`96ec195`](https://github.com/adobe/spectrum-design-data/commit/96ec1957d0e7ad064c5d25b5b876c2fd3d61c450), [`d7976e0`](https://github.com/adobe/spectrum-design-data/commit/d7976e05dc1d70b8330ff716f35d74f6b2f8fcbb), [`62e74d7`](https://github.com/adobe/spectrum-design-data/commit/62e74d7f4d59bcc3e63fbc5b7c594f65ef78b024), [`b4f79db`](https://github.com/adobe/spectrum-design-data/commit/b4f79db78d8b889b46b98d0fc26d424c1d4fe5fe), [`ecd5f38`](https://github.com/adobe/spectrum-design-data/commit/ecd5f38dd679730bf1f2b9b3980cd5032ac4a9f1), [`62e74d7`](https://github.com/adobe/spectrum-design-data/commit/62e74d7f4d59bcc3e63fbc5b7c594f65ef78b024), [`62e74d7`](https://github.com/adobe/spectrum-design-data/commit/62e74d7f4d59bcc3e63fbc5b7c594f65ef78b024), [`8d8bf09`](https://github.com/adobe/spectrum-design-data/commit/8d8bf0904e716ed86b10f890251980f73f0215c7), [`02cc09f`](https://github.com/adobe/spectrum-design-data/commit/02cc09fc2a40c8b93ff759dec5573d360815c707)]:
+  - @adobe/spectrum-design-data@0.9.0
+
+## 6.1.24
+
+### Patch Changes
+
+- Updated dependencies [[`c923bd2`](https://github.com/adobe/spectrum-design-data/commit/c923bd27bba0ee484ba251d9baf6a63c5cfc68d0), [`e38c4e1`](https://github.com/adobe/spectrum-design-data/commit/e38c4e19f97aa590991b0c1ac40c2e1b24620cde), [`f9585da`](https://github.com/adobe/spectrum-design-data/commit/f9585daf01d5dab651793ce6f1d816f320623204), [`09b3970`](https://github.com/adobe/spectrum-design-data/commit/09b39705547954ba44dabe41c70c5b76a6f8b43e), [`82bb4c4`](https://github.com/adobe/spectrum-design-data/commit/82bb4c46f67a0b4a1a74fb18514d53925f85a3ca), [`212ec82`](https://github.com/adobe/spectrum-design-data/commit/212ec825e25c5ce7ae7342072522423b3ce07483), [`11c4d5a`](https://github.com/adobe/spectrum-design-data/commit/11c4d5a937064ba24f69437c59ab5ad1bfbe5f8c), [`0297e7e`](https://github.com/adobe/spectrum-design-data/commit/0297e7ee77e102a3756302f83ab9236cd142ee58), [`5e7db36`](https://github.com/adobe/spectrum-design-data/commit/5e7db3605547e680f777fc345f0005d7e3637a7e), [`4218d6a`](https://github.com/adobe/spectrum-design-data/commit/4218d6a1694db70cb37f656cd0250e306e48912d), [`035a1f9`](https://github.com/adobe/spectrum-design-data/commit/035a1f95d909f8e443a5e51baee6e30d11eedde5)]:
+  - @adobe/spectrum-design-data@0.8.0
+
+## 6.1.23
+
+### Patch Changes
+
+- Updated dependencies [[`dcf0832`](https://github.com/adobe/spectrum-design-data/commit/dcf083214d56989817db192801638e3ec20e2306)]:
+  - @adobe/spectrum-design-data@0.7.1
+
+## 6.1.22
+
+### Patch Changes
+
+- Updated dependencies [[`a23dafb`](https://github.com/adobe/spectrum-design-data/commit/a23dafb1805dac8203baba669c61085133160454), [`a23dafb`](https://github.com/adobe/spectrum-design-data/commit/a23dafb1805dac8203baba669c61085133160454)]:
+  - @adobe/spectrum-design-data@0.7.0
+
+## 6.1.21
+
+### Patch Changes
+
+- Updated dependencies [[`e7fbcb0`](https://github.com/adobe/spectrum-design-data/commit/e7fbcb00b6afe1c1a272ed72b7ed22c08fe8e978), [`e7fbcb0`](https://github.com/adobe/spectrum-design-data/commit/e7fbcb00b6afe1c1a272ed72b7ed22c08fe8e978)]:
+  - @adobe/spectrum-design-data@0.6.0
+
+## 6.1.20
+
+### Patch Changes
+
+- Updated dependencies [[`f84bce2`](https://github.com/adobe/spectrum-design-data/commit/f84bce215d20f1bc8b109f3f23b15bfab6b239d0)]:
+  - @adobe/spectrum-design-data@0.4.0
+
+## 6.1.19
+
+### Patch Changes
+
+- Updated dependencies [[`60a4835`](https://github.com/adobe/spectrum-design-data/commit/60a4835e245965639a4ac89b41d2884dd63a0bbb)]:
+  - @adobe/spectrum-design-data@0.3.0
+
+## 6.1.18
+
+### Patch Changes
+
+- Updated dependencies [[`073c22a`](https://github.com/adobe/spectrum-design-data/commit/073c22a75c27fbb44eb57eb6cb7311e294066d76), [`e23264e`](https://github.com/adobe/spectrum-design-data/commit/e23264e681c56077b5582bf019123b941862779a), [`e23264e`](https://github.com/adobe/spectrum-design-data/commit/e23264e681c56077b5582bf019123b941862779a), [`e23264e`](https://github.com/adobe/spectrum-design-data/commit/e23264e681c56077b5582bf019123b941862779a)]:
+  - @adobe/spectrum-design-data@0.2.0
+
+## 6.1.17
+
+### Patch Changes
+
+- Updated dependencies [[`e9974fb`](https://github.com/adobe/spectrum-design-data/commit/e9974fb7360e849e928b31518b073996b49ecd6b), [`d12173a`](https://github.com/adobe/spectrum-design-data/commit/d12173abf2915df5b1dae02ef000dae769ba4b66), [`ba06968`](https://github.com/adobe/spectrum-design-data/commit/ba06968226adb268600e0ed1befc9d381e7986b6)]:
+  - @adobe/design-data-spec@1.5.0
+
+## 6.1.16
+
+### Patch Changes
+
+- Updated dependencies [[`cb48b36`](https://github.com/adobe/spectrum-design-data/commit/cb48b36bc7682e790e4b7c51ca157f58150fd462)]:
+  - @adobe/design-data-spec@1.4.0
+
+## 6.1.15
+
+### Patch Changes
+
+- Updated dependencies [[`c5bd47e`](https://github.com/adobe/spectrum-design-data/commit/c5bd47e72c59c7b4132464af6b6f39864a77704d)]:
+  - @adobe/design-data-spec@1.3.0
+
+## 6.1.14
+
+### Patch Changes
+
+- Updated dependencies [[`e05c3ef`](https://github.com/adobe/spectrum-design-data/commit/e05c3eff28caecbdb9782eb62023876e0d1f4947), [`a8dacbc`](https://github.com/adobe/spectrum-design-data/commit/a8dacbc3572f4e16da518707393a22d21d73272b)]:
+  - @adobe/design-data-spec@1.2.0
+
+## 6.1.13
+
+### Patch Changes
+
+- Updated dependencies [[`d387252`](https://github.com/adobe/spectrum-design-data/commit/d3872520226ffe20fb8eda1e6bfc60f2fc4f3435)]:
+  - @adobe/design-data-spec@1.1.0
+
+## 6.1.12
+
+### Patch Changes
+
+- Updated dependencies [[`0f256ce`](https://github.com/adobe/spectrum-design-data/commit/0f256ce0d067c87503979676d09cb4de7e904321)]:
+  - @adobe/design-data-spec@1.0.0
+
+## 6.1.11
+
+### Patch Changes
+
+- Updated dependencies [[`4e8ad86`](https://github.com/adobe/spectrum-design-data/commit/4e8ad86998b0e168396badb8a2a12207ebf535ae)]:
+  - @adobe/design-data-spec@0.15.0
+
+## 6.1.10
+
+### Patch Changes
+
+- Updated dependencies [[`1849738`](https://github.com/adobe/spectrum-design-data/commit/1849738b1a65d2656280aa7777d1169fcc3f036b)]:
+  - @adobe/design-data-spec@0.14.0
+
+## 6.1.9
+
+### Patch Changes
+
+- Updated dependencies [[`20bb703`](https://github.com/adobe/spectrum-design-data/commit/20bb7035ad7d62513670bfb393b70766a295e51c), [`20bb703`](https://github.com/adobe/spectrum-design-data/commit/20bb7035ad7d62513670bfb393b70766a295e51c), [`20bb703`](https://github.com/adobe/spectrum-design-data/commit/20bb7035ad7d62513670bfb393b70766a295e51c)]:
+  - @adobe/design-data-spec@0.13.0
+
+## 6.1.8
+
+### Patch Changes
+
+- Updated dependencies [[`b98a17d`](https://github.com/adobe/spectrum-design-data/commit/b98a17dfeaff24bf1bc17d0705c1ff9ce734f7d7), [`f3a0a6b`](https://github.com/adobe/spectrum-design-data/commit/f3a0a6b6bc03774e870aad989c16d9b532406aaf)]:
+  - @adobe/design-data-spec@0.12.0
+
+## 6.1.7
+
+### Patch Changes
+
+- Updated dependencies [[`e77379b`](https://github.com/adobe/spectrum-design-data/commit/e77379b24b3d66b09ce78b4cf20e2d15cefbe78b)]:
+  - @adobe/design-data-spec@0.11.0
+
+## 6.1.6
+
+### Patch Changes
+
+- Updated dependencies [[`8726a99`](https://github.com/adobe/spectrum-design-data/commit/8726a991f01f08e57c3545e5bb9274fab12f96b0), [`0650e39`](https://github.com/adobe/spectrum-design-data/commit/0650e39335edebfbefbadf7c39fb1cc399fa211e), [`9932351`](https://github.com/adobe/spectrum-design-data/commit/99323513890abb3ddad93f1394c756bf56526f27)]:
+  - @adobe/design-data-spec@0.10.0
+
+## 6.1.5
+
+### Patch Changes
+
+- Updated dependencies [[`0710522`](https://github.com/adobe/spectrum-design-data/commit/071052225694d1442a3bdc8094f2a67f9a24277f)]:
+  - @adobe/design-data-spec@0.9.0
+
+## 6.1.4
+
+### Patch Changes
+
+- Updated dependencies [[`d0297f0`](https://github.com/adobe/spectrum-design-data/commit/d0297f0042404a4e6381009ce80849c781f8db49)]:
+  - @adobe/design-data-spec@0.8.0
+
+## 6.1.3
+
+### Patch Changes
+
+- Updated dependencies [[`0e30511`](https://github.com/adobe/spectrum-design-data/commit/0e30511ec5ce916b76b97d116459a6421f0ddd4e), [`0e30511`](https://github.com/adobe/spectrum-design-data/commit/0e30511ec5ce916b76b97d116459a6421f0ddd4e)]:
+  - @adobe/design-data-spec@0.7.0
+
+## 6.1.2
+
+### Patch Changes
+
+- Updated dependencies [[`fd06340`](https://github.com/adobe/spectrum-design-data/commit/fd063404ebef790f37887611572a8ae1e49dc053)]:
+  - @adobe/design-data-spec@0.6.0
+
+## 6.1.1
+
+### Patch Changes
+
+- Updated dependencies [[`38127f5`](https://github.com/adobe/spectrum-design-data/commit/38127f556435783f31ab54c11d1ec6c93da17813)]:
+  - @adobe/design-data-spec@0.5.0
+
+## 6.1.0
+
+### Minor Changes
+
+- [#855](https://github.com/adobe/spectrum-design-data/pull/855) [`c9002db`](https://github.com/adobe/spectrum-design-data/commit/c9002db2da1d1bb40446b4991648dc7809a55f33) Thanks [@GarthDB](https://github.com/GarthDB)! - feat(component-schemas): migrate source of truth to design-data-spec components
+
+  `@adobe/spectrum-component-api-schemas` is now a thin adapter over
+  `@adobe/design-data-spec/components/`. All 80 component declarations have been
+  converted to the new format and live in `packages/design-data-spec/components/`.
+
+  The API surface is unchanged: `getAllSchemas()`, `getAllSlugs()`,
+  `getSchemaBySlug()`, `getSchemaFile()`, and `schemaFileNames` all behave
+  identically. Returned objects now include new fields (`name`, `displayName`,
+  `options`, `states`, `lifecycle`) alongside the existing aliases (`title`,
+  `properties`, `slug`) — no consumer breakage.
+
+  `@adobe/design-data-spec` minor: 79 component declarations added to
+  `components/`. `optionDescriptor` in `component.schema.json` now allows
+  additional JSON Schema keywords (`pattern`, `minimum`, `items`, etc.)
+  to accommodate real-world component option descriptors.
+
+### Patch Changes
+
+- Updated dependencies [[`c9002db`](https://github.com/adobe/spectrum-design-data/commit/c9002db2da1d1bb40446b4991648dc7809a55f33)]:
+  - @adobe/design-data-spec@0.4.0
+
+## 6.0.0
+
+### Major Changes
+
+- [#632](https://github.com/adobe/spectrum-design-data/pull/632) [`fa28b11`](https://github.com/adobe/spectrum-design-data/commit/fa28b117c6b84776f4ebe9bb281c29e14e0d64b6) Thanks [@GarthDB](https://github.com/GarthDB)! - BREAKING CHANGE: Repository renamed from spectrum-tokens to
+  spectrum-design-data
+
+  **Breaking Changes:**
+  - JSON Schema `$id` URIs changed (spectrum-tokens → spectrum-design-data)
+  - External tools referencing schemas by `$id` must update references
+
+  **Changes:**
+  - Updated all GitHub repository and Pages URLs
+  - Updated schema base URIs to maintain consistency
+
+  **Note:** NPM package names unchanged. GitHub redirects are in place.
+
+## 5.0.1
+
+### Patch Changes
+
+- [#621](https://github.com/adobe/spectrum-design-data/pull/621) [`ee2ceb5`](https://github.com/adobe/spectrum-design-data/commit/ee2ceb541dea5eb9b5267c861e44bfd804fd33a7) Thanks [@GarthDB](https://github.com/GarthDB)! - refactor(component-schemas): rename step-list to steplist
+
+  Renamed the `step-list` component schema to `steplist` for consistency with other single-word component names.
+
+  ## Components Changed (0 added, 1 deleted, 1 added)
+
+  **Original Branch:** `main`
+
+  **New Branch:** `refactor/rename-step-list-to-steplist`
+
+  ### 📦 Renamed Component
+  - `step-list` → `steplist` - Component schema renamed
+
+  ### Changes to steplist schema
+  - **$id**: Changed from `https://opensource.adobe.com/spectrum-design-data/schemas/components/step-list.json` to `https://opensource.adobe.com/spectrum-design-data/schemas/components/steplist.json`
+  - **title**: Changed from "Step list" to "Steplist"
+  - **documentationUrl**: Changed from `https://spectrum.adobe.com/page/step-list/` to `https://spectrum.adobe.com/page/steplist/`
+
+  All other properties remain unchanged. This is a non-breaking rename at the schema level, though consumers referencing the old filename will need to update their imports.
+
+## 5.0.0
+
+### Major Changes
+
+- [#614](https://github.com/adobe/spectrum-design-data/pull/614) [`a772572`](https://github.com/adobe/spectrum-design-data/commit/a772572de88c54d279c20d7148f6ac91eb941d2a) Thanks [@AmunMRa](https://github.com/AmunMRa)! - # Component Schemas Changed (9 added, 0 deleted, 3 updated)
+
+  **Original Branch:** `main`
+
+  **New Branch:** `feat-batch4-schema-updates`
+
+  ## 🚨 Breaking Changes Detected
+
+  This PR introduces **2 breaking change(s)** to component schemas. Please review carefully and ensure proper versioning.
+
+  ### 📦 Added Components (9)
+  - `calendar` - New component schema
+  - `cards` - New component schema
+  - `coach-mark` - New component schema
+  - `illustrated-message` - New component schema
+  - `list-view` - New component schema
+  - `standard-dialog` - New component schema
+  - `standard-panel` - New component schema
+  - `table` - New component schema
+  - `takeover-dialog` - New component schema
+
+  ### 💥 Breaking Updates ⚠️ BREAKING
+
+  **picker**
+  - Removed: `isReadOnly` property
+
+  **side-navigation**
+  - Added: `items` (array) - "The list of navigation items."
+  - Added: `selectionMode` (string, default: single) - "How selection is handled for items."
+  - Added: `required` - \["items"]
+
+  ### 🔄 Non-Breaking Updates
+
+  **alert-banner**
+  - Added: `variant`
+
+## 4.0.0
+
+### Major Changes
+
+- [#613](https://github.com/adobe/spectrum-design-data/pull/613) [`433efdd`](https://github.com/adobe/spectrum-design-data/commit/433efdd18f9b0842ae55acac3cd0fbc1e5e5db58) Thanks [@AmunMRa](https://github.com/AmunMRa)! - feat(component-schemas): add 10 new components with breaking changes to existing schemas
+
+  ## Component Schemas Changed (10 added, 0 deleted, 17 updated)
+
+  **Original Branch:** `main`
+
+  **New Branch:** `draft-schema-updates`
+
+  ### 🚨 Breaking Changes Detected
+
+  This PR introduces **7 breaking change(s)** to component schemas. Please review carefully and ensure proper versioning.
+
+  <details open><summary><strong>📦 Added Components (10)</strong></summary>
+
+  <!-- -->
+  - `accordion` - New component schema
+  - `avatar-group` - New component schema
+  - `color-handle` - New component schema
+  - `date-picker` - New component schema
+  - `drop-zone` - New component schema
+  - `number-field` - New component schema
+  - `segmented-control` - New component schema
+  - `steplist` - New component schema
+  - `tag-field` - New component schema
+  - `tag-group` - New component schema
+
+  </details>
+
+  <details open><summary><strong>💥 Breaking Updates ⚠️ BREAKING</strong></summary>
+
+  **checkbox-group**
+  - Removed: `isReadOnly` property
+
+  **combo-box**
+  - Added: `labelPosition`
+  - Removed: `isQuiet` property
+
+  **contextual-help**
+  - Added: `href` (string) - "Optional URL within contextual help content like a 'Learn more' link."
+  - Removed: `popoverOffset` property
+  - Updated: `popoverOffset` - default changed to "8"
+
+  **radio-button**
+  - Added: `label` - "The text displayed next to a radio button."
+  - Removed: `label` property
+  - Updated: `label`
+
+  **radio-group**
+  - Removed: `isReadOnly` property
+
+  **tabs**
+  - Added: `items` (array) - "An array of tab items."
+  - Removed: `size` property
+  - Removed: `density` property
+  - Removed: `isFluid` property
+  - Removed: `isQuiet` property
+  - Removed: `isEmphasized` property
+  - Removed: `alignment` property
+  - Removed: `selectedItem` property
+  - Removed: `keyboardActivation` property
+  - Updated: `orientation` - default changed to "horizontal"
+
+  **tree-view**
+  - Added: `isEmphasized` (boolean)
+  - Removed: `emphasized` property
+
+  </details>
+
+  <details><summary><strong>🔄 Non-Breaking Updates</strong></summary>
+
+  **breadcrumbs**
+  - Added: `isMultiline` (boolean) - "If true, the breadcrumb items will wrap to multiple lines."
+  - Added: `size` (string, default: m) - "Controls the overall size of the breadcrumb component."
+  - Added: `items` (array) - "An array of breadcrumb items."
+  - Added: `separator` (string, default: chevron) - "The separator icon used between breadcrumb items."
+  - Added: `isTruncated` (boolean) - "If true, the breadcrumb item is truncated and displayed as icon only."
+  - Added: `sizeOverride` (string) - "Overrides the size of the breadcrumb items when isMultiline is true."
+
+  **menu**
+  - Updated: `container` - removed `default: null`
+  - Updated: `selectionMode` - removed `default: null` and added `"no selection"` to enum
+
+  **button-group**
+  - Added: `overflowMode` (string, default: wrap)
+
+  **color-slider**
+  - Added: `channel` (string, default: hue) - "Which channel of the color this slider controls. Use 'alpha' for opacity."
+  - Updated: `value` - "Number (from minValue to maxValue)."
+
+  **divider**
+  - Updated: `size` - default changed to "s"
+
+  **in-line-alert**
+  - Added: `style` (string, default: outline) - "The visual style of the alert."
+  - Added: `href` (string) - "Optional URL within in-line alert content like a 'Learn more' link."
+  - Added: `heading` (string) - "Optional heading text displayed at the top of the alert."
+  - Added: `actionLabel` (string) - "If undefined, this button does not appear."
+  - Updated: `variant`
+
+  **slider**
+  - Added: `isRange` (boolean) - "If true, the slider will allow selection of a range of values by displaying two handles."
+
+  **swatch-group**
+  - Added: `cornerRadius` (string, default: none) - "Determines the corner radius of each swatch in the group. Partial refers to corner-radius-75."
+
+  **swatch**
+  - Added: `cornerRounding` - "Determines the corner radius of the swatch. Partial refers to corner-radius-75."
+  - Updated: `cornerRounding` - default changed to "none"
+
+  **text-field**
+  - Updated: `isError` - "If there is an error, this property overrides show valid icon."
+
+  </details>
+
+## 3.0.0
+
+### Major Changes
+
+- [#610](https://github.com/adobe/spectrum-design-data/pull/610) [`13d9202`](https://github.com/adobe/spectrum-design-data/commit/13d920273c02c78d3748522de6a7c7ee39b39814) Thanks [@GarthDB](https://github.com/GarthDB)! - Component schema improvements for Batch 1 components
+
+  Quality control pass on the Design API table for v0, ensuring schema consistency and completeness across S2 components.
+
+  ## Component Schemas Changed (0 added, 0 deleted, 11 updated)
+
+  **Original Branch:** `main`
+  **New Branch:** `component-schema-batch1-fixes`
+
+  ### 🚨 Breaking Changes Detected (5)
+
+  This release introduces **5 breaking change(s)** to component schemas. Please review carefully and ensure proper versioning.
+
+  <details open><summary><strong>💥 Breaking Updates</strong></summary>
+
+  **popover**
+  - Added: `hideTip` (boolean, default: false) - replaces removed `showTip`
+
+  **rating**
+  - Added: `value.minimum` (0), `value.maximum` (5), `value.multipleOf` (0.5)
+  - Updated: `value.description` - "From 0 to 5, can be a decimal to represent half stars"
+
+  **select-box**
+  - Added: `hideIllustration` (boolean, default: false) - replaces removed `showIllustration`
+  - Added: `isDisabled` (boolean, default: false)
+  - Added: `multiple` (boolean, default: false) - "Set to true to allow multiple selections"
+  - Updated: `orientation.default` changed to "vertical"
+
+  **status-light**
+  - Added: Colors to `variant.enum`: "gray", "red", "orange", "green", "cyan"
+  - Added: `required` - \["label"] - label is now required
+  - Removed: `isDisabled` property
+
+  **tooltip**
+  - Removed: "positive" from `variant.enum`
+  - Updated: `hasIcon.description` - "If the neutral variant, there is never an icon"
+
+  </details>
+
+  ### ✅ Non-Breaking Updates (6)
+
+  <details><summary><strong>🔄 Compatible Changes</strong></summary>
+
+  **help-text**
+  - Added: "negative" to `variant.enum`
+  - Added: `isDisabled.description` - "Help text cannot be both disabled and negative variant"
+
+  **meter**
+  - Added: `hideLabel` (boolean, default: false)
+
+  **progress-bar**
+  - Added: `staticColor` (string, enum: \["white"]) - "Static color can only be white, otherwise it is default"
+  - Added: `labelPosition` (string, enum: \["top", "side"], default: "top")
+  - Added: `hideLabel` (boolean, default: false)
+
+  **search-field**
+  - Added: `hideLabel` (boolean, default: false)
+  - Added: `icon` ($ref: workflow-icon.json) - "Icon must be present if the label is not defined"
+
+  **text-area**
+  - Added: `hideLabel` (boolean, default: false)
+
+  **text-field**
+  - Added: `hideLabel` (boolean, default: false)
+
+  </details>
+
+## 2.0.0
+
+### Major Changes
+
+- [#581](https://github.com/adobe/spectrum-design-data/pull/581) [`163fe7c`](https://github.com/adobe/spectrum-design-data/commit/163fe7c13bb00c639d202195a398126b6c25b58f) Thanks [@GarthDB](https://github.com/GarthDB)! - feat(component-schemas): add S2 Batch 2 components with breaking changes
+  - Add 6 new component schemas (coach-indicator, in-field-progress-button, etc.)
+  - Update avatar, badge, and checkbox components with breaking changes
+  - Expand size options and add new interaction states
+  - Major version bump required due to breaking schema changes
+
+## 1.0.2
+
+### Patch Changes
+
+- [#545](https://github.com/adobe/spectrum-design-data/pull/545) [`ebc79f6`](https://github.com/adobe/spectrum-design-data/commit/ebc79f6f91bce28a64cddfc2cc5548ddcf30389d) Thanks [@GarthDB](https://github.com/GarthDB)! - Fixed a typo where meter had `valueLable` instead of `valueLabel`.
+
+## 1.0.1
+
+### Patch Changes
+
+- [#523](https://github.com/adobe/spectrum-design-data/pull/523) [`9c5a2ac`](https://github.com/adobe/spectrum-design-data/commit/9c5a2ac5fccb29b6f106396b21d91aab949043d4) Thanks [@GarthDB](https://github.com/GarthDB)! - S2 components batch 1 (part 2)
+
+  ## Changes
+
+  ### Properties added
+  - component: select-box
+    - `body`
+
+  ### Properties updated
+  - component: text-area
+    - `errorMessage`
+      - removed: `"default": null`
+
+## 1.0.0
+
+### Major Changes
+
+- [#520](https://github.com/adobe/spectrum-design-data/pull/520) [`2964807`](https://github.com/adobe/spectrum-design-data/commit/2964807641908e40820bea0556b3b0542503223b) Thanks [@GarthDB](https://github.com/GarthDB) and [@AmunMRa](https://github.com/AmunMRa)! - S2 components batch 1
+
+  ## Changes
+
+  ### Properties Added
+  - component: search-field
+    - `helpText`
+    - `placeholder`
+    - `state`:
+      - `down`
+  - component: status-light
+    - `variant`
+      - `seafoam`
+      - `pink`
+      - `turquoise`
+      - `cinnamon`
+      - `brown`
+      - `silver`
+  - component: text-area
+    - `helpText`
+  - component: text-field
+    - `helpText`
+
+  ### Properties removed
+  - component: search-field
+    - `isQuiet`
+  - component: text-area
+    - `isQuiet`
+    - `isReadOnly`
+  - component: text-field
+    - `isQuiet`
+    - `isReadOnly`
+
+  ### Properties updated
+  - component: meter
+    - `size`:
+      - `enum`: `["small", "large"]` -> `["s", "m", "l", "xl"]`
+      - `default`: `large` -> `m`
+  - component: popover
+    - `showTip`:
+      - `default`: `false` -> `true`
+    - `placement`:
+      - `default`: `bottom` -> `top`
+    - `offset`:
+      - `default`: `6` -> `8`
+
+  ### New Component
+  - select-box
+
+## 0.0.0
+
+### Minor Changes
+
+- [#353](https://github.com/adobe/spectrum-design-data/pull/353) [`71e674a`](https://github.com/adobe/spectrum-design-data/commit/71e674ad6baa630a900785ae21c9dcae93233b21) Thanks [@karstens](https://github.com/karstens)! - Release to latest branch
+
+## 0.0.0-schema-20240821152525
+
+### Patch Changes
+
+- [#353](https://github.com/adobe/spectrum-design-data/pull/353) [`dc2d6c6`](https://github.com/adobe/spectrum-design-data/commit/dc2d6c6e12c1ea4fdc0d891b3fd50ea0b1697dd7) Thanks [@karstens](https://github.com/karstens)! - Making adjustments to bring the schema more in line with what was on the spectrum website.
+
+## 0.0.0-schema-20240620220450
+
+### Minor Changes
+
+- [#353](https://github.com/adobe/spectrum-design-data/pull/353) [`64379eb`](https://github.com/adobe/spectrum-design-data/commit/64379ebeaf9402fe77ca1adfd020f42df60c60d9) Thanks [@karstens](https://github.com/karstens)! - Added schema for search-field and fixed some path bugs in testing
+
+## 0.0.0-schema-20240618053842
+
+### Minor Changes
+
+- [#353](https://github.com/adobe/spectrum-design-data/pull/353) [`b5c1579`](https://github.com/adobe/spectrum-design-data/commit/b5c15792ec5f5e5c269bfa7bf58af3df42e648c1) Thanks [@karstens](https://github.com/karstens)! - Initial release
+
+## 0.0.0-schema-20240614194147
+
+### Patch Changes
+
+- [#353](https://github.com/adobe/spectrum-design-data/pull/353) [`9805167`](https://github.com/adobe/spectrum-design-data/commit/980516791c0bef9e2f0bbeffe6515f103f3ad7a2) Thanks [@karstens](https://github.com/karstens)! - fixed some bugs
+
+## 0.0.0-schema-20240613154750
+
+### Patch Changes
+
+- [#353](https://github.com/adobe/spectrum-design-data/pull/353) [`6ff5ad7`](https://github.com/adobe/spectrum-design-data/commit/6ff5ad7a75356f4b93d07a2818b357da19ce5b4b) Thanks [@karstens](https://github.com/karstens)! - Initial release

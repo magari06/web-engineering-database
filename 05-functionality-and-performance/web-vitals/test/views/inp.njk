@@ -1,0 +1,186 @@
+<!--
+ Copyright 2022 Google LLC
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+     https://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+-->
+
+{% extends 'layout.njk' %}
+
+{% block content %}
+  <h1 elementtiming="main-heading" data-target="main-heading">INP Test</h1>
+  <p>
+    <label id="label1"><input type="number" value="0" id="mousedown-blocking-time">
+    <code>mousedown</code> blocking time</label>
+  </p>
+  <p>
+    <label><input type="number" value="0" id="mouseup-blocking-time">
+    <code>mouseup</code> blocking time</label>
+  </p>
+  <p>
+    <label><input type="number" value="0" id="pointerdown-blocking-time">
+    <code>pointerdown</code> blocking time</label>
+  </p>
+  <p>
+    <label><input type="number" value="0" id="pointerup-blocking-time">
+    <code>pointerup</code> blocking time</label>
+  </p>
+  <p>
+    <label><input type="number" value="0" id="keydown-blocking-time">
+    <code>keydown</code> blocking time</label>
+  </p>
+  <p>
+    <label><input type="number" value="0" id="keyup-blocking-time">
+    <code>keyup</code> blocking time</label>
+  </p>
+  <p>
+    <label><input type="number" value="0" id="click-blocking-time">
+    <code>click</code> blocking time</label>
+  </p>
+  <p>
+    <button id="reset">Reset blocking time to zero</button>
+  </p>
+
+  <p>
+    <textarea id="textarea" style="width:40em;height:5em"></textarea>
+  </p>
+
+  <script>
+    // Set the blocking values based on query params if present.
+    const params = new URLSearchParams(location.search);
+    for (const [key, value] of params) {
+      const el = document.getElementById(`${key}-blocking-time`);
+      if (el?.nodeName.toLowerCase() === 'input') {
+        el.value = value;
+      }
+    }
+
+    function block(event) {
+      const blockingTime = Number(document.getElementById(`${event.type}-blocking-time`).value);
+      const startTime = performance.now();
+      while (performance.now() < startTime + blockingTime) {
+        // Block...
+      }
+    }
+
+    function onInput(event) {
+      const input = event.target;
+      const eventName = input.id.slice(0, input.id.indexOf('-'));
+      if (input.value > 0) {
+        addEventListener(eventName, block, true);
+      } else {
+        removeEventListener(eventName, block, true);
+      }
+    }
+
+    function addBlockingListeners() {
+      const eventNames = [
+        'mousedown',
+        'mouseup',
+        'pointerdown',
+        'pointerup',
+        'keydown',
+        'keyup',
+        'click',
+      ];
+      for (const eventName of eventNames) {
+        const input = document.getElementById(`${eventName}-blocking-time`);
+        input.addEventListener('input', onInput, true);
+        if (input.value > 0) {
+          addEventListener(eventName, block, true);
+        }
+      }
+    }
+
+    document.getElementById('reset').addEventListener('click', () => {
+      [...document.querySelectorAll('label>input')].forEach((n) => n.value = 0);
+    });
+
+    addBlockingListeners();
+  </script>
+
+  <p><a id="navigate-away" href="https://example.com">Navigate away</a></p>
+  {% if prerender %}<p><a id="prerender-link" href="/test/inp{% if queryString %}?{{ queryString | safe }}{% endif %}">Prerender link</a></p>{% endif %}
+
+  <p><button id="soft-nav">Soft navigate</button></p>
+
+  <p id="softnav-title"></p>
+  <p id="softnav-paragraph"></p>
+
+  <script type="module">
+    const {onINP} = await __testImport('{{ modulePath }}');
+
+    const queue = new Set();
+    function addToQueue(metric) {
+      queue.add(metric);
+    }
+
+    onINP((inp) => {
+      inp.instance = 1;
+
+      // Log for easier manual testing.
+      console.log('INP:', inp);
+
+      if (self.__batchReporting) {
+        console.log('Adding to queue');
+        addToQueue(inp);
+      } else {
+        // Test sending the metric to an analytics endpoint.
+        navigator.sendBeacon(`/collect`, JSON.stringify(__toSafeObject(inp)));
+      }
+    }, {
+      reportAllChanges: self.__reportAllChanges,
+      reportSoftNavs: self.__reportSoftNavs,
+      durationThreshold: self.__durationThreshold,
+      generateTarget: self.__generateTarget && ((el) => el?.dataset?.target),
+      includeProcessedEventEntries: self.__includeProcessedEventEntries,
+    });
+
+    if (self.__batchReporting) {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') {
+          for (const inp of queue) {
+            navigator.sendBeacon(`/collect`, JSON.stringify(__toSafeObject(inp)));
+          }
+          queue.clear();
+        }
+      });
+    }
+
+    if (self.__doubleCall) {
+      onINP((inp) => {
+        inp.instance = 2;
+
+        // Log for easier manual testing.
+        console.log('INP2:', inp);
+
+        // Test sending the metric to an analytics endpoint.
+        navigator.sendBeacon(`/collect`, JSON.stringify(__toSafeObject(inp)));
+      }, {
+        reportAllChanges: self.__reportAllChanges2,
+        reportSoftNavs: self.__reportSoftNavs2,
+        durationThreshold: self.__durationThreshold2,
+        generateTarget: self.__generateTarget2 && ((el) => el?.dataset?.target),
+      });
+    }
+  </script>
+  {% if prerender %}
+  <script type="speculationrules">
+  {
+    "prerender": [
+      {
+        "urls": ["/test/inp{% if queryString %}?{{ queryString | safe }}{% endif %}"]
+      }
+    ]
+  }
+  </script>
+{% endif %}
+{% endblock %}

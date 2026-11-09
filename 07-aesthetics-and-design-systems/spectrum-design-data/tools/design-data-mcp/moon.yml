@@ -1,0 +1,76 @@
+# Copyright 2026 Adobe. All rights reserved.
+# This file is licensed to you under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License. You may obtain a copy
+# of the License at http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software distributed under
+# the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+# OF ANY KIND, either express or implied. See the License for the specific language
+# governing permissions and limitations under the License.
+$schema: "https://moonrepo.dev/schemas/project.json"
+layer: tool
+tasks:
+  start:
+    command:
+      - node
+      - src/cli.js
+    preset: "server"
+  stage:
+    # Generate the MCPB staging directory (without validating or packing).
+    # Used by both `test` and `bundle` as a dep so the staged tree always exists.
+    command:
+      - node
+      - scripts/generate-mcpb.mjs
+    deps:
+      # generate-mcpb.mjs resolves @adobe/design-data-wasm via its main entry
+      # (pkg/node/design_data_wasm.js), which only exists after sdk-wasm:build.
+      - sdk-wasm:build
+    inputs:
+      - src/**/*
+      - scripts/generate-mcpb.mjs
+      - README.md
+      - package.json
+      - /packages/design-data/guidelines/**/*.json
+      - /packages/design-data/components/**/*.json
+      - /packages/design-data/package.json
+      - /tools/design-data/src/**/*
+      - /tools/design-data/package.json
+      - /sdk/wasm/package.json
+      - /sdk/wasm/pkg/node/**/*
+      - /pnpm-lock.yaml
+      - /docs/site/public/adobe_logo.svg
+      - /LICENSE
+    outputs:
+      - dist/design-data-mcp-bundle
+  test:
+    command:
+      - pnpm
+      - ava
+    deps:
+      - "~:stage"
+    inputs:
+      - src/**/*
+      - test/**/*
+      - ava.config.js
+      - package.json
+      - scripts/generate-mcpb.mjs
+      - /packages/design-data/guidelines/**/*.json
+      - /docs/s2-docs/**/*.md
+      - /pnpm-lock.yaml
+  bundle:
+    # Produce design-data.mcpb — a self-contained Claude Desktop Extension archive.
+    #
+    # Steps:
+    #   1. ~:stage generates the staging dir (dep below — cached when inputs unchanged).
+    #   2. npx @anthropic-ai/mcpb validate checks the staged bundle.
+    #   3. npx @anthropic-ai/mcpb pack produces dist/design-data.mcpb.
+    command:
+      - bash
+      - -c
+      - >-
+        pnpm exec mcpb validate dist/design-data-mcp-bundle &&
+        pnpm exec mcpb pack dist/design-data-mcp-bundle dist/design-data.mcpb
+    deps:
+      - "~:stage"
+    outputs:
+      - dist/design-data.mcpb

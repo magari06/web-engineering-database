@@ -1,0 +1,152 @@
+import { coerceFormValue } from '@conform-to/zod/v4/future';
+import { z } from 'zod';
+import { isDirty, useForm, useFormData } from '@conform-to/react/future';
+
+const taskSchema = coerceFormValue(
+	z.object({
+		content: z.string(),
+		completed: z.boolean().default(false),
+	}),
+);
+
+const todosSchema = coerceFormValue(
+	z.object({
+		title: z.string(),
+		tasks: z.array(taskSchema).nonempty(),
+	}),
+);
+
+async function handleSave(value: z.infer<typeof todosSchema>) {
+	await new Promise((resolve) => {
+		setTimeout(resolve, Math.random() * 1000);
+	});
+
+	if (value.tasks.length > 3) {
+		return 'Max 3 tasks';
+	}
+
+	return null;
+}
+
+export default function Todos() {
+	const { form, fields, intent } = useForm(todosSchema, {
+		async onSubmit(event, { value, update }) {
+			event.preventDefault();
+
+			const error = await handleSave(value);
+
+			if (error) {
+				update({
+					error: {
+						formErrors: [error],
+					},
+				});
+			} else {
+				update({
+					reset: true,
+					targetValue: value,
+				});
+			}
+		},
+	});
+	const dirty = useFormData(
+		form.id,
+		(formData) =>
+			isDirty(formData, { defaultValue: form.defaultValue }) ?? false,
+	);
+	const tasks = fields.tasks.getFieldList();
+
+	return (
+		<form method="post" {...form.props}>
+			<div>
+				<label htmlFor={fields.title.id}>Title</label>
+				<input
+					id={fields.title.id}
+					className={!fields.title.valid ? 'error' : ''}
+					name={fields.title.name}
+					defaultValue={fields.title.defaultValue ?? ''}
+				/>
+				<div>{fields.title.errors}</div>
+			</div>
+			<hr />
+			<div className="form-error">{fields.tasks.errors}</div>
+			{tasks.map((task, index) => {
+				const taskFields = task.getFieldset();
+
+				return (
+					<fieldset key={task.key}>
+						<div>
+							<label htmlFor={taskFields.content.id}>Task #{index + 1}</label>
+							<input
+								id={taskFields.content.id}
+								className={!taskFields.content.valid ? 'error' : ''}
+								name={taskFields.content.name}
+								defaultValue={taskFields.content.defaultValue}
+							/>
+							<div>{taskFields.content.errors}</div>
+						</div>
+						<div>
+							<label htmlFor={taskFields.completed.id}>Completed</label>
+							<input
+								id={taskFields.completed.id}
+								type="checkbox"
+								className={!taskFields.completed.valid ? 'error' : ''}
+								name={taskFields.completed.name}
+								defaultChecked={taskFields.completed.defaultChecked}
+							/>
+						</div>
+						<button
+							type="button"
+							onClick={() => {
+								intent.remove({ name: fields.tasks.name, index });
+							}}
+						>
+							Delete
+						</button>
+						<button
+							type="button"
+							onClick={() => {
+								intent.reorder({
+									name: fields.tasks.name,
+									from: index,
+									to: 0,
+								});
+							}}
+						>
+							Move to top
+						</button>
+						<button
+							type="button"
+							onClick={() => {
+								intent.update({
+									name: task.name,
+									value: { content: '' },
+								});
+							}}
+						>
+							Clear
+						</button>
+					</fieldset>
+				);
+			})}
+			<button
+				type="button"
+				onClick={() =>
+					intent.insert({
+						name: fields.tasks.name,
+					})
+				}
+			>
+				Add task
+			</button>
+			<hr />
+			<button disabled={!dirty}>Save</button>
+			<button
+				type="button"
+				onClick={() => intent.reset({ defaultValue: form.defaultValue })}
+			>
+				Reset
+			</button>
+		</form>
+	);
+}

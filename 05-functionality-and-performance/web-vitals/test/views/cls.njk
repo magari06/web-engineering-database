@@ -1,0 +1,104 @@
+<!--
+ Copyright 2020 Google LLC
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+     https://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+-->
+
+{% extends 'layout.njk' %}
+
+{% block content %}
+  <h1 elementtiming="main-heading">CLS Test</h1>
+  {% if noLayoutShifts %}
+    <p id="p1">This text does not shift.</p>
+  {% else %}
+    <p id="p2">
+      <img id="img1" elementtiming="main-image" {% if imgHidden %}hidden{% endif %} src="/test/img/square.png?delay=600" alt="Gray square" />
+      [text node contents]
+    </p>
+    <p id="p3" data-target="secondary-image-wrapper"><img id="img3" elementtiming="secondary-image" {% if img2Hidden %}hidden{% endif %} src="/test/img/square.png?delay=1000" alt="Gray square" /></p>
+    <p id="p4">Text below the images that will get pushed down.</p>
+  {% endif %}
+
+  <p id="p5"><a id="navigate-away" href="https://example.com">Navigate away</a></p>
+  {% if prerender %}<p id="p6"><a id="prerender-link" href="/test/cls{% if queryString %}?{{ queryString | safe }}{% endif %}">Prerender link</a></p>{% endif %}
+
+  <p><button id="soft-nav">Soft navigate</button></p>
+
+  <p id="softnav-title"></p>
+  <p id="softnav-paragraph"></p>
+
+  <script type="module">
+    const {onCLS} = await __testImport('{{ modulePath }}');
+
+    const queue = new Set();
+    function addToQueue(metric) {
+      queue.add(metric);
+    }
+
+    onCLS((cls) => {
+      cls.instance = 1;
+
+      // Log for easier manual testing.
+      console.log('CLS:', cls);
+
+      if (self.__batchReporting) {
+        console.log('Adding to queue');
+        addToQueue(cls);
+      } else {
+        // Test sending the metric to an analytics endpoint.
+        navigator.sendBeacon(`/collect`, JSON.stringify(__toSafeObject(cls)));
+      }
+    }, {
+      reportAllChanges: self.__reportAllChanges,
+      reportSoftNavs: self.__reportSoftNavs,
+      generateTarget: self.__generateTarget && ((el) => el.dataset.target),
+    });
+
+    if (self.__batchReporting) {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') {
+          for (const cls of queue) {
+            navigator.sendBeacon(`/collect`, JSON.stringify(__toSafeObject(cls)));
+          }
+          queue.clear();
+        }
+      });
+    }
+
+    if (self.__doubleCall) {
+      onCLS((cls) => {
+        cls.instance = 2;
+
+        // Log for easier manual testing.
+        console.log('CLS2:', cls);
+
+        // Test sending the metric to an analytics endpoint.
+        navigator.sendBeacon(`/collect`, JSON.stringify(__toSafeObject(cls)));
+      }, {
+        reportAllChanges: self.__reportAllChanges2,
+        reportSoftNavs: self.__reportSoftNavs2,
+        generateTarget: self.__generateTarget2 && ((el) => el.dataset.target),
+      });
+    }
+  </script>
+  {% if prerender %}
+  <script type="speculationrules">
+  {
+    "prerender": [
+      {
+        "urls": ["/test/cls{% if queryString %}?{{ queryString | safe }}{% endif %}"]
+      }
+    ]
+  }
+  </script>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,1612 @@
+import { assertType, describe, expectTypeOf, test } from 'vitest';
+import type {
+	BaseControlProps,
+	Control,
+	DefaultValue,
+	FieldMetadata,
+	FieldName,
+	Fieldset,
+	FormValue,
+	FormMetadata,
+	FormOptions,
+	SubmissionResult,
+	InferBaseErrorShape,
+	InferCustomFieldMetadata,
+	InferCustomFormMetadata,
+	InferCustomState,
+	IntentDispatcher,
+	IntentHandler,
+} from '@conform-to/react/future';
+import {
+	useForm,
+	useFormData,
+	useIntent,
+	configureForms,
+	shape,
+	defineIntent,
+	defineCustomState,
+	resolveSubmission,
+} from '@conform-to/react/future';
+import { useRef } from 'react';
+
+test('DefaultValue', () => {
+	// Primitive types
+	assertType<DefaultValue<string>>(undefined);
+	assertType<DefaultValue<string>>(null);
+	assertType<DefaultValue<string>>('text');
+
+	assertType<DefaultValue<number>>(undefined);
+	assertType<DefaultValue<number>>(null);
+	assertType<DefaultValue<number>>(42);
+
+	assertType<DefaultValue<boolean>>(undefined);
+	assertType<DefaultValue<boolean>>(null);
+	assertType<DefaultValue<boolean>>(true);
+
+	// Array types
+	assertType<DefaultValue<string[]>>(undefined);
+	assertType<DefaultValue<string[]>>(null);
+	assertType<DefaultValue<string[]>>(['a', 'b']);
+	assertType<DefaultValue<string[]>>([undefined, null, 'text']);
+
+	assertType<DefaultValue<number[]>>(undefined);
+	assertType<DefaultValue<number[]>>(null);
+	assertType<DefaultValue<number[]>>([1, 2, 3]);
+
+	// Object types
+	type UserObject = { name: string; email: string };
+	assertType<DefaultValue<UserObject>>(undefined);
+	assertType<DefaultValue<UserObject>>(null);
+	assertType<DefaultValue<UserObject>>({
+		name: 'John',
+		email: undefined,
+	});
+	assertType<DefaultValue<UserObject>>({
+		name: null,
+		email: 'john@example.com',
+	});
+	assertType<DefaultValue<UserObject>>({
+		name: 'John',
+		email: 'john@example.com',
+	});
+
+	// Nested object types
+	type NestedObject = { user: { name: string; age: number } };
+	assertType<DefaultValue<NestedObject>>(undefined);
+	assertType<DefaultValue<NestedObject>>(null);
+	assertType<DefaultValue<NestedObject>>({
+		user: { name: 'John', age: null },
+	});
+	assertType<DefaultValue<NestedObject>>({
+		user: { name: undefined, age: 30 },
+	});
+	assertType<DefaultValue<NestedObject>>({
+		user: { name: 'John', age: 30 },
+	});
+
+	// Array of objects
+	type ItemArray = Array<{ id: string; name: string }>;
+	assertType<DefaultValue<ItemArray>>(undefined);
+	assertType<DefaultValue<ItemArray>>(null);
+	assertType<DefaultValue<ItemArray>>([
+		{ id: '1' },
+		{ name: null },
+		{ id: undefined },
+	]);
+	assertType<DefaultValue<ItemArray>>([{ name: 'Item' }]);
+	assertType<DefaultValue<ItemArray>>([{ id: '1', name: 'Item' }]);
+	assertType<DefaultValue<ItemArray>>([null, undefined, { id: '1' }]);
+
+	// File types should only accept null/undefined
+	assertType<DefaultValue<File>>(undefined);
+	assertType<DefaultValue<File>>(null);
+
+	assertType<DefaultValue<File[]>>(undefined);
+	assertType<DefaultValue<File[]>>([undefined, null]);
+	assertType<DefaultValue<File[]>>(null);
+
+	// Test with variable assignments to ensure exactOptionalPropertyTypes compatibility
+	const stringWithUndefined: DefaultValue<string> = undefined;
+	const stringWithNull: DefaultValue<string> = null;
+	const stringWithValue: DefaultValue<string> = 'text';
+
+	const numberWithUndefined: DefaultValue<number> = undefined;
+	const objectWithUndefined: DefaultValue<UserObject> = undefined;
+	const arrayWithUndefined: DefaultValue<string[]> = undefined;
+
+	// Verify variables (to avoid unused variable warnings)
+	assertType<DefaultValue<string>>(stringWithUndefined);
+	assertType<DefaultValue<string>>(stringWithNull);
+	assertType<DefaultValue<string>>(stringWithValue);
+	assertType<DefaultValue<number>>(numberWithUndefined);
+	assertType<DefaultValue<UserObject>>(objectWithUndefined);
+	assertType<DefaultValue<string[]>>(arrayWithUndefined);
+
+	// String literal types should not be widened to string
+	expectTypeOf<DefaultValue<'abc'>>().toEqualTypeOf<'abc' | null | undefined>();
+	// @ts-expect-error default value should not accept any string
+	assertType<DefaultValue<'abc'>>('def');
+
+	// Unions of string literals stay narrow
+	expectTypeOf<DefaultValue<'active' | 'inactive'>>().toEqualTypeOf<
+		'active' | 'inactive' | null | undefined
+	>();
+
+	// Template literal types stay narrow
+	expectTypeOf<DefaultValue<`#${string}`>>().toEqualTypeOf<
+		`#${string}` | null | undefined
+	>();
+
+	// Literal-typed object properties narrow
+	type StatusObject = { status: 'abc'; name: string };
+	expectTypeOf<DefaultValue<StatusObject>>().toEqualTypeOf<
+		| { status?: 'abc' | null | undefined; name?: string | null | undefined }
+		| null
+		| undefined
+	>();
+	// @ts-expect-error wrong literal on a field should be rejected
+	assertType<DefaultValue<StatusObject>>({ status: 'def', name: 'John' });
+
+	// Arrays of literals narrow their items
+	expectTypeOf<DefaultValue<'abc'[]>>().toEqualTypeOf<
+		('abc' | null | undefined)[] | null | undefined
+	>();
+
+	// Nullable and optional constituents of string unions keep their literals
+	expectTypeOf<DefaultValue<'save' | 'publish' | undefined>>().toEqualTypeOf<
+		'save' | 'publish' | null | undefined
+	>();
+	expectTypeOf<DefaultValue<'save' | null>>().toEqualTypeOf<
+		'save' | null | undefined
+	>();
+
+	// Optional literal-typed fields (e.g. z.enum([...]).optional()) stay narrow
+	type IntentObject = { intent?: 'save' | 'publish' };
+	expectTypeOf<DefaultValue<IntentObject>>().toEqualTypeOf<
+		{ intent?: 'save' | 'publish' | null | undefined } | null | undefined
+	>();
+	// @ts-expect-error unsupported literal should be rejected
+	assertType<DefaultValue<IntentObject>>({ intent: 'delete' });
+});
+
+test('literal default values in intents', () => {
+	type FormShape = {
+		status: 'draft' | 'published';
+		items: Array<{ role: 'admin' | 'member' }>;
+	};
+
+	const intent = {} as IntentDispatcher<FormShape>;
+	const untypedIntent = {} as IntentDispatcher<Record<string, any>>;
+	const statusName = 'status' as FieldName<FormShape['status']>;
+	const itemsName = 'items' as FieldName<FormShape['items']>;
+	const dynamicName = 'status' as string | undefined;
+
+	assertType<void>(intent.reset({ defaultValue: { status: 'published' } }));
+	// @ts-expect-error programmatic reset should reject unsupported literals
+	intent.reset({ defaultValue: { status: 'archived' } });
+	assertType<string>(
+		intent.reset.serialize({ defaultValue: { status: 'published' } }),
+	);
+	// @ts-expect-error serialized reset should reject unsupported literals
+	intent.reset.serialize({ defaultValue: { status: 'archived' } });
+
+	assertType<void>(intent.update({ value: { status: 'published' } }));
+	// @ts-expect-error whole-form updates should reject unsupported literals
+	intent.update({ value: { status: 'archived' } });
+	assertType<string>(
+		intent.update.serialize({ value: { status: 'published' } }),
+	);
+	// @ts-expect-error serialized whole-form updates should reject unsupported literals
+	intent.update.serialize({ value: { status: 'archived' } });
+
+	assertType<void>(intent.update({ name: statusName, value: 'draft' }));
+	// @ts-expect-error branded field updates should reject unsupported literals
+	intent.update({ name: statusName, value: 'archived' });
+	assertType<string>(
+		intent.update.serialize({ name: statusName, value: 'draft' }),
+	);
+	// @ts-expect-error serialized branded field updates should reject unsupported literals
+	intent.update.serialize({ name: statusName, value: 'archived' });
+
+	assertType<void>(
+		intent.update({ name: itemsName, index: 0, value: { role: 'member' } }),
+	);
+	// @ts-expect-error indexed field updates should reject unsupported literals
+	intent.update({ name: itemsName, index: 0, value: { role: 'owner' } });
+	assertType<string>(
+		intent.update.serialize({
+			name: itemsName,
+			index: 0,
+			value: { role: 'member' },
+		}),
+	);
+	intent.update.serialize({
+		name: itemsName,
+		index: 0,
+		// @ts-expect-error serialized indexed updates should reject unsupported literals
+		value: { role: 'owner' },
+	});
+
+	assertType<void>(
+		untypedIntent.update({ name: statusName, value: 'published' }),
+	);
+	// @ts-expect-error branded names should remain typed on an untyped form
+	untypedIntent.update({ name: statusName, value: 'archived' });
+	assertType<string>(
+		untypedIntent.update.serialize({ name: statusName, value: 'published' }),
+	);
+	// @ts-expect-error serialized branded names should remain typed on an untyped form
+	untypedIntent.update.serialize({ name: statusName, value: 'archived' });
+
+	assertType<void>(
+		untypedIntent.update({
+			name: itemsName,
+			index: 0,
+			value: { role: 'admin' },
+		}),
+	);
+	// @ts-expect-error indexed branded names should remain typed on an untyped form
+	untypedIntent.update({ name: itemsName, index: 0, value: { role: 'owner' } });
+
+	assertType<void>(
+		intent.update({ name: dynamicName, value: { arbitrary: true } }),
+	);
+	assertType<string>(
+		intent.update.serialize({
+			name: dynamicName,
+			value: { arbitrary: true },
+		}),
+	);
+
+	assertType<void>(
+		intent.insert({ name: itemsName, defaultValue: { role: 'admin' } }),
+	);
+	// @ts-expect-error programmatic inserts should reject unsupported literals
+	intent.insert({ name: itemsName, defaultValue: { role: 'owner' } });
+	assertType<string>(
+		intent.insert.serialize({
+			name: itemsName,
+			defaultValue: { role: 'admin' },
+		}),
+	);
+	intent.insert.serialize({
+		name: itemsName,
+		// @ts-expect-error serialized inserts should reject unsupported literals
+		defaultValue: { role: 'owner' },
+	});
+
+	assertType<void>(
+		intent.remove({
+			name: itemsName,
+			index: 0,
+			onInvalid: 'insert',
+			defaultValue: { role: 'member' },
+		}),
+	);
+	intent.remove({
+		name: itemsName,
+		index: 0,
+		onInvalid: 'insert',
+		// @ts-expect-error programmatic fallback inserts should reject unsupported literals
+		defaultValue: { role: 'owner' },
+	});
+	assertType<string>(
+		intent.remove.serialize({
+			name: itemsName,
+			index: 0,
+			onInvalid: 'insert',
+			defaultValue: { role: 'member' },
+		}),
+	);
+	intent.remove.serialize({
+		name: itemsName,
+		index: 0,
+		onInvalid: 'insert',
+		// @ts-expect-error serialized fallback inserts should reject unsupported literals
+		defaultValue: { role: 'owner' },
+	});
+
+	// DOM-derived metadata remains intentionally broad
+	const metadata = {} as FieldMetadata<FormShape['status']>;
+
+	assertType<string>(metadata.defaultValue);
+	assertType<unknown>(metadata.defaultPayload);
+});
+
+test('FormOptions', () => {
+	type TestSchema = { name: string; email: string };
+
+	// Users must provide at least one of onSubmit or lastResult
+	assertType<FormOptions<TestSchema>>({
+		lastResult: undefined,
+	});
+
+	// Users can provide onSubmit instead of lastResult
+	assertType<FormOptions<TestSchema>>({
+		onSubmit: () => {},
+	});
+
+	// Users should be able to pass null for lastResult
+	assertType<FormOptions<TestSchema>>({
+		lastResult: null,
+	});
+
+	assertType<FormOptions<TestSchema>>({
+		defaultValue: new URLSearchParams('name=John&email=john%40example.com'),
+	});
+
+	assertType<FormOptions<TestSchema>>({
+		onValidate({ error, schemaValue }) {
+			expectTypeOf(schemaValue).toEqualTypeOf<undefined>();
+
+			return {
+				result: error,
+				pending: Promise.resolve(null),
+			};
+		},
+	});
+
+	assertType<FormOptions<TestSchema, any, undefined, object>>({
+		onValidate({ schemaValue }) {
+			expectTypeOf(schemaValue).toEqualTypeOf<unknown>();
+
+			return undefined;
+		},
+	});
+
+	assertType<FormOptions<TestSchema>>({
+		// @ts-expect-error staged validation no longer accepts a tuple
+		onValidate({ error }) {
+			return [error, Promise.resolve(null)];
+		},
+	});
+});
+
+test('useForm', () => {
+	const basicForm = useForm({
+		onValidate({ error }) {
+			return error;
+		},
+	});
+
+	expectTypeOf(basicForm.form).toEqualTypeOf<FormMetadata<string[]>>();
+	expectTypeOf(basicForm.fields).toEqualTypeOf<
+		Fieldset<Record<string, any>, string[]>
+	>();
+	expectTypeOf(basicForm.intent).toEqualTypeOf<
+		IntentDispatcher<Record<string, any>>
+	>();
+
+	const errorShapeInferred = useForm({
+		onValidate({ error }) {
+			return {
+				formErrors: error.formErrors?.join(', ') ?? null,
+				fieldErrors: Object.fromEntries(
+					Object.entries(error.fieldErrors).map(([key, messages]) => [
+						key,
+						messages?.join(', ') ?? null,
+					]),
+				),
+			};
+		},
+	});
+
+	expectTypeOf(errorShapeInferred.form).toEqualTypeOf<FormMetadata<string>>();
+	expectTypeOf(errorShapeInferred.fields).toEqualTypeOf<
+		Fieldset<Record<string, any>, string>
+	>();
+	expectTypeOf(errorShapeInferred.intent).toEqualTypeOf<
+		IntentDispatcher<Record<string, any>>
+	>();
+
+	const testSchema = {
+		'~standard': {
+			version: 1,
+			vendor: 'test',
+			validate: () => ({ value: { email: '' } }),
+			types: {} as {
+				input: { email: string; password: string };
+				output: { email: string; password: string };
+			},
+		},
+	} as const;
+
+	const schemaBasedForm = useForm(testSchema, {
+		lastResult: null,
+	});
+
+	expectTypeOf(schemaBasedForm.form).toEqualTypeOf<FormMetadata<string[]>>();
+	expectTypeOf(schemaBasedForm.fields).toEqualTypeOf<
+		Fieldset<{ email: string; password: string }, string[]>
+	>();
+	expectTypeOf(schemaBasedForm.intent).toEqualTypeOf<
+		IntentDispatcher<{ email: string; password: string }>
+	>();
+
+	const testSchemaWithCustomErrorShape = useForm(testSchema, {
+		onValidate({ error }) {
+			return {
+				formErrors: error.formErrors?.join(', ') ?? null,
+				fieldErrors: Object.fromEntries(
+					Object.entries(error.fieldErrors).map(([key, messages]) => [
+						key,
+						messages?.join(', ') ?? null,
+					]),
+				),
+			};
+		},
+	});
+
+	expectTypeOf(testSchemaWithCustomErrorShape.form).toEqualTypeOf<
+		FormMetadata<string>
+	>();
+	expectTypeOf(testSchemaWithCustomErrorShape.fields).toEqualTypeOf<
+		Fieldset<{ email: string; password: string }, string>
+	>();
+	expectTypeOf(testSchemaWithCustomErrorShape.intent).toEqualTypeOf<
+		IntentDispatcher<{ email: string; password: string }>
+	>();
+
+	const goToStep = defineIntent<{ step: number }>({
+		parse(payload) {
+			if (
+				typeof payload !== 'object' ||
+				payload === null ||
+				!('step' in payload) ||
+				typeof payload.step !== 'number'
+			) {
+				throw new Error('Invalid goToStep payload');
+			}
+
+			return payload;
+		},
+	});
+	const intentInferred = useForm({
+		intents: {
+			goToStep,
+		},
+		onValidate({ intent, error }) {
+			if (intent?.type === 'goToStep') {
+				assertType<number>(intent.payload.step);
+			}
+
+			return error;
+		},
+	});
+
+	expectTypeOf(intentInferred.form).toEqualTypeOf<FormMetadata<string[]>>();
+	expectTypeOf(intentInferred.fields).toEqualTypeOf<
+		Fieldset<Record<string, any>, string[]>
+	>();
+	expectTypeOf(intentInferred.intent).toEqualTypeOf<
+		IntentDispatcher<Record<string, any>, { goToStep: typeof goToStep }>
+	>();
+	assertType<void>(intentInferred.intent.goToStep({ step: 1 }));
+	assertType<string>(intentInferred.intent.goToStep.serialize({ step: 1 }));
+});
+
+describe('configureForms', () => {
+	const testSchema = {
+		'~standard': {
+			version: 1,
+			vendor: 'test',
+			validate: () => ({ value: { email: '' } }),
+			types: {} as {
+				input: { email: string; password: string };
+				output: { email: string; password: string };
+			},
+		},
+	} as const;
+
+	test('custom validateSchema', () => {
+		const custom = configureForms({
+			validateSchema() {
+				return {
+					error: {
+						formErrors: [{ message: 'Form error' }],
+						fieldErrors: {
+							email: [{ message: 'Email error' }],
+						},
+					},
+				};
+			},
+		});
+
+		const basicForm = custom.useForm({
+			onValidate({ error }) {
+				return error;
+			},
+		});
+
+		expectTypeOf(basicForm.form).toEqualTypeOf<
+			FormMetadata<{ message: string }[]>
+		>();
+		expectTypeOf(basicForm.fields).toEqualTypeOf<
+			Fieldset<Record<string, any>, { message: string }[]>
+		>();
+		expectTypeOf(basicForm.intent).toEqualTypeOf<
+			IntentDispatcher<Record<string, any>>
+		>();
+
+		const errorShapeInferred = custom.useForm({
+			onValidate({ error }) {
+				return {
+					formErrors:
+						error.formErrors?.map((error) => ({
+							...error,
+							type: 'custom',
+						})) ?? null,
+					fieldErrors: Object.fromEntries(
+						Object.entries(error.fieldErrors).map(([key, messages]) => [
+							key,
+							messages?.map((error) => ({
+								...error,
+								type: 'custom',
+							})) ?? null,
+						]),
+					),
+				};
+			},
+		});
+
+		expectTypeOf(errorShapeInferred.form).toEqualTypeOf<
+			FormMetadata<{ message: string; type: string }[]>
+		>();
+		expectTypeOf(errorShapeInferred.fields).toEqualTypeOf<
+			Fieldset<Record<string, any>, { message: string; type: string }[]>
+		>();
+		expectTypeOf(errorShapeInferred.intent).toEqualTypeOf<
+			IntentDispatcher<Record<string, any>>
+		>();
+
+		const schemaBasedForm = custom.useForm(testSchema, {
+			lastResult: null,
+		});
+
+		expectTypeOf(schemaBasedForm.form).toEqualTypeOf<
+			FormMetadata<{ message: string }[]>
+		>();
+		expectTypeOf(schemaBasedForm.fields).toEqualTypeOf<
+			Fieldset<{ email: string; password: string }, { message: string }[]>
+		>();
+		expectTypeOf(schemaBasedForm.intent).toEqualTypeOf<
+			IntentDispatcher<{ email: string; password: string }>
+		>();
+
+		const testSchemaWithCustomErrorShape = custom.useForm(testSchema, {
+			onValidate({ error }) {
+				return {
+					formErrors:
+						error.formErrors?.map((error) => error.message).join(', ') ?? null,
+					fieldErrors: Object.fromEntries(
+						Object.entries(error.fieldErrors).map(([key, messages]) => [
+							key,
+							messages?.map((error) => error.message).join(', ') ?? null,
+						]),
+					),
+				};
+			},
+		});
+
+		expectTypeOf(testSchemaWithCustomErrorShape.form).toEqualTypeOf<
+			FormMetadata<string>
+		>();
+		expectTypeOf(testSchemaWithCustomErrorShape.fields).toEqualTypeOf<
+			Fieldset<{ email: string; password: string }, string>
+		>();
+		expectTypeOf(testSchemaWithCustomErrorShape.intent).toEqualTypeOf<
+			IntentDispatcher<{ email: string; password: string }>
+		>();
+	});
+
+	test('custom errorShape', () => {
+		const custom = configureForms({
+			isError: shape<{ message: string }>(),
+		});
+
+		custom.useForm({
+			// @ts-expect-error error should be match the custom shape
+			onValidate({ error }) {
+				return error;
+			},
+		});
+
+		const errorShapeInferred = custom.useForm({
+			onValidate({ error }) {
+				return {
+					formErrors: error.formErrors
+						? { message: error.formErrors.join(', '), type: 'custom' }
+						: null,
+					fieldErrors: Object.fromEntries(
+						Object.entries(error.fieldErrors).map(([key, messages]) => [
+							key,
+							messages
+								? { message: messages.join(', '), type: 'custom' }
+								: null,
+						]),
+					),
+				};
+			},
+		});
+
+		expectTypeOf(errorShapeInferred.form).toEqualTypeOf<
+			FormMetadata<{ message: string; type: string }>
+		>();
+		expectTypeOf(errorShapeInferred.fields).toEqualTypeOf<
+			Fieldset<Record<string, any>, { message: string; type: string }>
+		>();
+		expectTypeOf(errorShapeInferred.intent).toEqualTypeOf<
+			IntentDispatcher<Record<string, any>>
+		>();
+
+		custom.useForm(
+			testSchema,
+			// @ts-expect-error onValidate is required when the custom error shape does not match the schema's error shape
+			{ lastResult: null },
+		);
+
+		const testSchemaWithCustomErrorShape = custom.useForm(testSchema, {
+			onValidate({ error }) {
+				return {
+					formErrors: error.formErrors
+						? { message: error.formErrors.join(', '), type: 'custom' }
+						: null,
+					fieldErrors: Object.fromEntries(
+						Object.entries(error.fieldErrors).map(([key, messages]) => [
+							key,
+							messages
+								? { message: messages.join(', '), type: 'custom' }
+								: null,
+						]),
+					),
+				};
+			},
+		});
+
+		expectTypeOf(testSchemaWithCustomErrorShape.form).toEqualTypeOf<
+			FormMetadata<{ message: string; type: string }>
+		>();
+		expectTypeOf(testSchemaWithCustomErrorShape.fields).toEqualTypeOf<
+			Fieldset<
+				{ email: string; password: string },
+				{ message: string; type: string }
+			>
+		>();
+		expectTypeOf(testSchemaWithCustomErrorShape.intent).toEqualTypeOf<
+			IntentDispatcher<{ email: string; password: string }>
+		>();
+	});
+
+	test('custom validateSchema matching custom errorShape', () => {
+		const custom = configureForms({
+			validateSchema() {
+				return {
+					error: {
+						formErrors: { message: 'Form error' },
+						fieldErrors: {
+							email: { message: 'Email error' },
+						},
+					},
+				};
+			},
+			isError: shape<{ message: string }>(),
+		});
+
+		const basicForm = custom.useForm({
+			onValidate({ error }) {
+				return error;
+			},
+		});
+
+		expectTypeOf(basicForm.form).toEqualTypeOf<
+			FormMetadata<{ message: string }>
+		>();
+		expectTypeOf(basicForm.fields).toEqualTypeOf<
+			Fieldset<Record<string, any>, { message: string }>
+		>();
+		expectTypeOf(basicForm.intent).toEqualTypeOf<
+			IntentDispatcher<Record<string, any>>
+		>();
+
+		const errorShapeInferred = custom.useForm({
+			onValidate({ error }) {
+				return {
+					formErrors: error.formErrors
+						? { message: error.formErrors.message, type: 'custom' }
+						: null,
+					fieldErrors: Object.fromEntries(
+						Object.entries(error.fieldErrors).map(([key, fieldError]) => [
+							key,
+							fieldError
+								? { message: fieldError.message, type: 'custom' }
+								: null,
+						]),
+					),
+				};
+			},
+		});
+
+		expectTypeOf(errorShapeInferred.form).toEqualTypeOf<
+			FormMetadata<{ message: string; type: string }>
+		>();
+		expectTypeOf(errorShapeInferred.fields).toEqualTypeOf<
+			Fieldset<Record<string, any>, { message: string; type: string }>
+		>();
+		expectTypeOf(errorShapeInferred.intent).toEqualTypeOf<
+			IntentDispatcher<Record<string, any>>
+		>();
+
+		const schemaBasedForm = custom.useForm(testSchema, {
+			lastResult: null,
+		});
+
+		expectTypeOf(schemaBasedForm.form).toEqualTypeOf<
+			FormMetadata<{ message: string }>
+		>();
+		expectTypeOf(schemaBasedForm.fields).toEqualTypeOf<
+			Fieldset<{ email: string; password: string }, { message: string }>
+		>();
+		expectTypeOf(schemaBasedForm.intent).toEqualTypeOf<
+			IntentDispatcher<{ email: string; password: string }>
+		>();
+
+		const testSchemaWithCustomErrorShape = custom.useForm(testSchema, {
+			onValidate({ error }) {
+				return {
+					formErrors: error.formErrors
+						? { message: error.formErrors.message, type: 'custom' }
+						: null,
+					fieldErrors: Object.fromEntries(
+						Object.entries(error.fieldErrors).map(([key, fieldError]) => [
+							key,
+							fieldError
+								? { message: fieldError.message, type: 'custom' }
+								: null,
+						]),
+					),
+				};
+			},
+		});
+
+		expectTypeOf(testSchemaWithCustomErrorShape.form).toEqualTypeOf<
+			FormMetadata<{ message: string; type: string }>
+		>();
+		expectTypeOf(testSchemaWithCustomErrorShape.fields).toEqualTypeOf<
+			Fieldset<
+				{ email: string; password: string },
+				{ message: string; type: string }
+			>
+		>();
+		expectTypeOf(testSchemaWithCustomErrorShape.intent).toEqualTypeOf<
+			IntentDispatcher<{ email: string; password: string }>
+		>();
+	});
+
+	test('custom intents', () => {
+		const goToStep = defineIntent<{ step: number }>({
+			parse(payload) {
+				if (
+					typeof payload !== 'object' ||
+					payload === null ||
+					!('step' in payload) ||
+					typeof payload.step !== 'number'
+				) {
+					throw new Error('Invalid goToStep payload');
+				}
+
+				return payload;
+			},
+		});
+		const custom = configureForms({
+			intents: {
+				goToStep,
+			},
+		});
+
+		const globalIntentSetup = custom.useForm({
+			onValidate({ intent, error }) {
+				if (intent?.type === 'goToStep') {
+					assertType<number>(intent.payload.step);
+				}
+
+				return error;
+			},
+		});
+
+		expectTypeOf(globalIntentSetup.intent).toEqualTypeOf<
+			IntentDispatcher<Record<string, any>, { goToStep: typeof goToStep }>
+		>();
+		assertType<void>(globalIntentSetup.intent.goToStep({ step: 1 }));
+		assertType<string>(
+			globalIntentSetup.intent.goToStep.serialize({ step: 1 }),
+		);
+		assertType<void>(custom.useIntent('form-id').goToStep({ step: 1 }));
+		assertType<string>(
+			custom.useIntent('form-id').goToStep.serialize({ step: 1 }),
+		);
+
+		// @ts-expect-error unknown custom intents should not be exposed without typing
+		custom.useIntent('form-id').unknownIntent();
+
+		const resolvedSubmission = resolveSubmission(
+			{
+				intent: 'goToStep({"step":1})',
+				payload: { step: '0' },
+				fields: ['step'],
+			},
+			{
+				handlers: { goToStep },
+			},
+		);
+
+		assertType<Record<string, FormValue> | undefined>(
+			resolvedSubmission.targetValue,
+		);
+		// @ts-expect-error resolveSubmission no longer returns `value`
+		void resolvedSubmission.value;
+
+		if (resolvedSubmission.intent?.type === 'goToStep') {
+			assertType<number>(resolvedSubmission.intent.payload.step);
+		} else if (resolvedSubmission.intent?.type === 'submit') {
+			assertType<string | undefined>(resolvedSubmission.intent.payload);
+		}
+
+		const resolvedConfiguredSubmission = custom.resolveSubmission({
+			intent: 'goToStep({"step":1})',
+			payload: { step: '0' },
+			fields: ['step'],
+		});
+
+		expectTypeOf(resolvedConfiguredSubmission).toEqualTypeOf<
+			typeof resolvedSubmission
+		>();
+
+		const confirm = defineIntent<string>({
+			parse(payload) {
+				if (typeof payload !== 'string') {
+					throw new Error('Invalid confirm payload');
+				}
+
+				return payload;
+			},
+		});
+
+		const inlineIntentSetup = custom.useForm({
+			intents: {
+				confirm,
+			},
+			onValidate({ intent, error }) {
+				if (intent?.type === 'confirm') {
+					assertType<string>(intent.payload);
+				} else if (intent?.type === 'goToStep') {
+					assertType<number>(intent.payload.step);
+				}
+
+				return error;
+			},
+		});
+
+		expectTypeOf(inlineIntentSetup.intent).toEqualTypeOf<
+			IntentDispatcher<
+				Record<string, any>,
+				{ goToStep: typeof goToStep; confirm: typeof confirm }
+			>
+		>();
+		assertType<void>(inlineIntentSetup.intent.confirm('confirm'));
+		assertType<string>(inlineIntentSetup.intent.confirm.serialize('confirm'));
+		assertType<void>(custom.useIntent('form-id').goToStep({ step: 1 }));
+		assertType<string>(
+			custom.useIntent('form-id').goToStep.serialize({ step: 1 }),
+		);
+	});
+
+	test('custom state', () => {
+		const goToStep = defineIntent<{ step: number }>({
+			parse(payload) {
+				if (
+					typeof payload !== 'object' ||
+					payload === null ||
+					!('step' in payload) ||
+					typeof payload.step !== 'number'
+				) {
+					throw new Error('Invalid goToStep payload');
+				}
+
+				return payload;
+			},
+		});
+		const step = defineCustomState<number, { goToStep: typeof goToStep }>({
+			initialize() {
+				return 0;
+			},
+			reset: false,
+			handleIntent(state, ctx) {
+				assertType<
+					| 'submit'
+					| 'reset'
+					| 'validate'
+					| 'update'
+					| 'insert'
+					| 'remove'
+					| 'reorder'
+					| 'goToStep'
+				>(ctx.intent.type);
+				if (ctx.intent.type === 'goToStep') {
+					assertType<number>(ctx.intent.payload.step);
+					return ctx.intent.payload.step;
+				}
+
+				return state;
+			},
+		});
+		const dismiss = defineIntent();
+		const summary = defineCustomState<
+			{ dismissed: boolean },
+			{ goToStep: typeof goToStep; dismiss: typeof dismiss }
+		>({
+			initialize() {
+				return { dismissed: false };
+			},
+			reset(state, ctx) {
+				assertType<SubmissionResult | undefined>(ctx.result);
+
+				return state;
+			},
+			handleIntent(state, ctx) {
+				if (ctx.intent.type === 'dismiss') {
+					return {
+						dismissed: true,
+					};
+				}
+
+				if (ctx.intent.type === 'goToStep') {
+					return {
+						dismissed: false,
+					};
+				}
+
+				return state;
+			},
+		});
+		const status = defineCustomState<
+			'idle' | 'success' | 'error',
+			{},
+			string[]
+		>({
+			initialize() {
+				return 'idle';
+			},
+			reset(state, ctx) {
+				assertType<'idle' | 'success' | 'error'>(state);
+				assertType<SubmissionResult<string[]> | undefined>(ctx.result);
+				assertType<string[] | null | undefined>(ctx.result?.error?.formErrors);
+
+				return state;
+			},
+			handleResult(state, ctx) {
+				assertType<'client' | 'server'>(ctx.phase);
+				assertType<SubmissionResult<string[]>>(ctx.result);
+				assertType<string[] | null | undefined>(ctx.result.error?.formErrors);
+
+				if (ctx.intent.type === 'submit') {
+					return ctx.result.error ? 'error' : 'success';
+				}
+
+				return state;
+			},
+		});
+
+		const custom = configureForms({
+			customState: {
+				step,
+				status,
+			},
+			intents: {
+				goToStep,
+			},
+			extendFormMetadata(form) {
+				return {
+					currentStep: form.customState.step,
+				};
+			},
+		});
+
+		expectTypeOf<InferCustomState<typeof custom.config>>().toEqualTypeOf<{
+			step: number;
+			status: 'idle' | 'success' | 'error';
+		}>();
+
+		const setup = custom.useForm({
+			intents: {
+				dismiss,
+			},
+			customState: {
+				summary,
+			},
+			onValidate({ error }) {
+				return error;
+			},
+		});
+
+		expectTypeOf(setup.form.customState).toEqualTypeOf<{
+			step: number;
+			status: 'idle' | 'success' | 'error';
+			summary: { dismissed: boolean };
+		}>();
+		expectTypeOf(setup.form.currentStep).toEqualTypeOf<number>();
+
+		configureForms({
+			customState: {
+				// @ts-expect-error custom intents used in custom state handlers must be defined
+				step,
+			},
+		});
+
+		custom.useForm({
+			customState: {
+				// @ts-expect-error custom intents used in custom state handlers must be defined
+				summary,
+			},
+			onValidate({ error }) {
+				return error;
+			},
+		});
+
+		configureForms({
+			intents: {
+				goToStep: defineIntent<(step: number) => void>(),
+			},
+			customState: {
+				// @ts-expect-error custom intent signature should match (`step: number` vs `{ step: number }`)
+				wizard: defineCustomState<
+					{ step: number },
+					{ goToStep: typeof goToStep }
+				>({
+					initialize() {
+						return { step: 0 };
+					},
+					handleIntent(state) {
+						return state;
+					},
+				}),
+			},
+		});
+
+		const inlineSetup = useForm({
+			customState: {
+				summary: defineCustomState({
+					initialize() {
+						return { dismissed: false };
+					},
+					handleIntent(state) {
+						return state;
+					},
+				}),
+			},
+			onValidate({ error }) {
+				return error;
+			},
+		});
+
+		expectTypeOf(inlineSetup.form.customState).toEqualTypeOf<{
+			summary: { dismissed: boolean };
+		}>();
+	});
+});
+
+test('defineIntent', () => {
+	const confirm = defineIntent<(payload: string) => void>({
+		parse(payload) {
+			assertType<string>(payload);
+
+			return payload;
+		},
+		resolve(context) {
+			assertType<string>(context.payload);
+
+			return context.value;
+		},
+	});
+
+	expectTypeOf(confirm).toEqualTypeOf<
+		IntentHandler<(payload: string) => void>
+	>();
+
+	const updateField = defineIntent<
+		(name: string, value: string) => void,
+		{
+			name: string;
+			value: string;
+		}
+	>({
+		parse(name, value) {
+			assertType<string>(name);
+			assertType<string>(value);
+
+			return { name, value };
+		},
+		resolve(context) {
+			assertType<Record<string, FormValue>>(context.value);
+			assertType<string>(context.payload.name);
+			assertType<string>(context.payload.value);
+
+			return {
+				[context.payload.name]: context.payload.value,
+			};
+		},
+		touch(context) {
+			assertType<string>(context.name);
+			assertType<string>(context.payload.name);
+
+			return context.name === context.payload.name;
+		},
+		move(context) {
+			assertType<string>(context.name);
+			assertType<'applied' | 'reverted' | 'modified'>(context.status);
+			assertType<Record<string, FormValue> | undefined>(context.targetValue);
+			assertType<string>(context.payload.name);
+
+			return context.name;
+		},
+	});
+
+	const configured = configureForms({
+		intents: {
+			updateField,
+		},
+	});
+
+	assertType<void>(
+		configured.useIntent('form-id').updateField('title', 'value'),
+	);
+	assertType<string>(
+		configured.useIntent('form-id').updateField.serialize('title', 'value'),
+	);
+	// @ts-expect-error value must be a string
+	configured.useIntent('form-id').updateField.serialize('title', 1);
+	// @ts-expect-error unknown custom intents should not be exposed without typing
+	configured.useIntent('form-id').unknownIntent();
+
+	assertType<void>(
+		useIntent<{ updateField: typeof updateField }>('form-id').updateField(
+			'title',
+			'value',
+		),
+	);
+	assertType<string>(
+		useIntent<{ updateField: typeof updateField }>(
+			'form-id',
+		).updateField.serialize('title', 'value'),
+	);
+
+	assertType<void>(
+		useIntent<{ title: string }, { updateField: typeof updateField }>(
+			'form-id',
+		).updateField('title', 'value'),
+	);
+	assertType<string>(
+		useIntent<{ title: string }, { updateField: typeof updateField }>(
+			'form-id',
+		).updateField.serialize('title', 'value'),
+	);
+});
+
+test('IntentDispatcher', () => {
+	// IntentDispatcher is the return type of useIntent
+	type Trial = {
+		foo: string;
+		bar: number;
+		baz: boolean;
+	};
+
+	type TestSchema = {
+		name: string;
+		tags: string[];
+		tasks: Array<{ content: string; completed: boolean }>;
+		trial: Trial;
+		trials: Trial[];
+		nullableTrials: Trial[] | null | undefined;
+	};
+
+	const intent = {} as IntentDispatcher<TestSchema>;
+
+	// Verify all intent methods exist
+	expectTypeOf(intent.submit).toBeFunction();
+	expectTypeOf(intent.validate).toBeFunction();
+	expectTypeOf(intent.update).toBeFunction();
+	expectTypeOf(intent.insert).toBeFunction();
+	expectTypeOf(intent.remove).toBeFunction();
+	expectTypeOf(intent.reorder).toBeFunction();
+
+	// Test validate
+	assertType<void>(intent.validate());
+	assertType<void>(intent.validate('name'));
+	assertType<string>(intent.validate.serialize());
+	assertType<string>(intent.validate.serialize('name'));
+
+	// Test submit
+	assertType<void>(intent.submit());
+	assertType<void>(intent.submit('delete'));
+	assertType<string>(intent.submit.serialize());
+	assertType<string>(intent.submit.serialize('delete'));
+
+	// Test remove
+	assertType<void>(intent.remove({ name: 'tasks', index: 0 }));
+	assertType<string>(intent.remove.serialize({ name: 'tasks', index: 0 }));
+	// @ts-expect-error index must be a number
+	intent.remove.serialize({ name: 'tasks', index: '0' });
+
+	// Test reorder
+	assertType<void>(intent.reorder({ name: 'tasks', from: 0, to: 1 }));
+
+	// Test insert
+	assertType<void>(intent.insert({ name: 'tags' }));
+	assertType<string>(intent.insert.serialize({ name: 'tags' }));
+	assertType<void>(intent.insert({ name: 'tags', defaultValue: 'new-tag' }));
+	assertType<void>(intent.insert({ name: 'tags', defaultValue: undefined }));
+	assertType<void>(
+		intent.insert({
+			name: 'tasks' as FieldName<
+				Array<{ content: string; completed: boolean }>
+			>,
+			defaultValue: { content: 'New Task' },
+		}),
+	);
+
+	// Test update
+	assertType<void>(intent.update({ name: 'name', value: 'text' }));
+	assertType<string>(intent.update.serialize({ name: 'name', value: 'text' }));
+	assertType<void>(intent.update({ name: 'name', value: null }));
+	assertType<void>(intent.update({ name: 'name', value: undefined }));
+	assertType<void>(
+		intent.update({
+			name: 'tasks' as FieldName<
+				Array<{ content: string; completed: boolean }>
+			>,
+			index: 0,
+			value: { content: 'foo' },
+		}),
+	);
+	assertType<void>(
+		intent.update({
+			name: 'trials' as FieldName<Trial[]>,
+			index: 0,
+			value: { foo: 'foo' },
+		}),
+	);
+	assertType<void>(
+		intent.update({
+			name: 'trials' as FieldName<Trial[]>,
+			index: 0,
+			value: undefined,
+		}),
+	);
+	assertType<void>(
+		intent.update({
+			name: 'nullableTrials' as FieldName<Trial[] | null | undefined>,
+			index: 0,
+			value: { bar: 1 },
+		}),
+	);
+	assertType<void>(
+		intent.update({
+			name: 'trial' as FieldName<Trial>,
+			value: {
+				foo: 'foo',
+				bar: 1,
+				baz: true,
+			},
+		}),
+	);
+	intent.update({
+		name: 'trial' as FieldName<Trial>,
+		value: {
+			foo: 'foo',
+			bar: 1,
+			baz: true,
+			// @ts-expect-error extra properties should be rejected on non-indexed updates
+			extra: 123,
+		},
+	});
+	intent.update({
+		name: 'trials' as FieldName<Trial[]>,
+		index: 0,
+		value: {
+			foo: 'foo',
+			bar: 1,
+			baz: true,
+			// @ts-expect-error extra properties should be rejected on indexed updates
+			extra: 123,
+		},
+	});
+	intent.update({
+		name: 'nullableTrials' as FieldName<Trial[] | null | undefined>,
+		index: 0,
+		value: {
+			foo: 'foo',
+			bar: 1,
+			baz: true,
+			// @ts-expect-error extra properties should be rejected on nullable indexed updates
+			extra: 123,
+		},
+	});
+	assertType<void>(
+		intent.update({
+			value: {
+				name: 'Updated Name',
+				tags: ['tag1', 'tag2'],
+			},
+		}),
+	);
+});
+
+test('FieldMetadata', () => {
+	interface TestInterface {
+		field: string;
+		nested: {
+			value: number;
+		};
+	}
+
+	// Test with type declaration
+	type TestType = {
+		field: string;
+		nested: {
+			value: number;
+		};
+	};
+
+	// Mock field metadata
+	const interfaceField = {} as FieldMetadata<TestInterface | null | undefined>;
+	const typeField = {} as FieldMetadata<TestType | null | undefined>;
+
+	// Both should correctly infer the fieldset type
+	const interfaceFieldset = interfaceField.getFieldset();
+
+	// Verify that both have the correct properties
+	assertType<FieldMetadata<string>>(interfaceFieldset.field);
+	assertType<FieldMetadata<{ value: number }>>(interfaceFieldset.nested);
+
+	const typeFieldset = typeField.getFieldset();
+
+	assertType<FieldMetadata<string>>(typeFieldset.field);
+	assertType<FieldMetadata<{ value: number }>>(typeFieldset.nested);
+
+	const customFieldset = typeField.getFieldset<
+		TestInterface | null | undefined
+	>();
+
+	assertType<FieldMetadata<string>>(customFieldset.field);
+	assertType<FieldMetadata<{ value: number }>>(customFieldset.nested);
+
+	const customNestedFieldset = customFieldset.nested.getFieldset();
+
+	assertType<FieldMetadata<number>>(customNestedFieldset.value);
+});
+
+test('Control', () => {
+	const control = {} as Control;
+
+	// Verify all control properties exist and have correct types
+	assertType<string | undefined>(control.value);
+	assertType<boolean | undefined>(control.checked);
+	assertType<string[] | undefined>(control.options);
+	assertType<File[] | undefined>(control.files);
+
+	// Verify methods exist
+	expectTypeOf(control.register).toBeFunction();
+	expectTypeOf(control.change).toBeFunction();
+	expectTypeOf(control.focus).toBeFunction();
+	expectTypeOf(control.blur).toBeFunction();
+
+	// Test method signatures
+	assertType<void>(control.register(null));
+	assertType<void>(control.change('text'));
+	assertType<void>(control.change(['option1', 'option2']));
+	assertType<void>(control.change(null));
+	assertType<void>(control.focus());
+	assertType<void>(control.blur());
+});
+
+test('BaseControl', () => {
+	assertType<BaseControlProps>({
+		name: 'title',
+		defaultValue: 'Hello world',
+		id: 'title-field',
+		disabled: true,
+	});
+
+	assertType<BaseControlProps>({
+		type: 'checkbox',
+		name: 'newsletter',
+		value: 'yes',
+		defaultChecked: true,
+		required: true,
+	});
+
+	assertType<BaseControlProps>({
+		type: 'radio',
+		name: 'theme',
+		value: 'dark',
+		defaultChecked: true,
+	});
+
+	assertType<BaseControlProps>({
+		type: 'select',
+		name: 'tags',
+		defaultValue: ['a', 'b'],
+		multiple: true,
+		required: true,
+	});
+
+	assertType<BaseControlProps>({
+		type: 'textarea',
+		name: 'notes',
+		defaultValue: 'hello',
+		rows: 4,
+		maxLength: 100,
+	});
+
+	assertType<BaseControlProps>({
+		type: 'fieldset',
+		name: 'range',
+		defaultValue: { start: '2026-01-01', end: '2026-01-07' },
+		disabled: true,
+	});
+
+	assertType<BaseControlProps>({
+		type: 'text',
+		name: 'title',
+		// @ts-expect-error text base controls should use defaultValue instead of value
+		value: 'Hello world',
+	});
+});
+
+test('useFormData', () => {
+	const formRef = useRef<HTMLFormElement>(null);
+
+	// Without fallback - returns Value | undefined
+	const resultWithoutFallback = useFormData(formRef, (formData) =>
+		formData.get('name'),
+	);
+	assertType<string | null | undefined>(resultWithoutFallback);
+
+	// With fallback - returns Value (no undefined)
+	const resultWithFallback = useFormData(
+		formRef,
+		(formData) => formData.get('name') ?? '',
+		{ fallback: '' },
+	);
+	assertType<string>(resultWithFallback);
+	// Verify it's not undefined
+	expectTypeOf(resultWithFallback).not.toBeUndefined();
+
+	// With acceptFiles: true and fallback
+	const resultWithFilesAndFallback = useFormData(
+		formRef,
+		(formData) => formData.getAll('files'),
+		{ acceptFiles: true, fallback: [] as FormDataEntryValue[] },
+	);
+	assertType<FormDataEntryValue[]>(resultWithFilesAndFallback);
+
+	// With acceptFiles: true without fallback
+	const resultWithFilesNoFallback = useFormData(
+		formRef,
+		(formData) => formData.getAll('files'),
+		{ acceptFiles: true },
+	);
+	assertType<FormDataEntryValue[] | undefined>(resultWithFilesNoFallback);
+});
+
+test('InferBaseErrorShape, InferCustomFormMetadata, and InferCustomFieldMetadata', () => {
+	// Test with minimal config (no custom metadata)
+	const simpleResult = configureForms();
+
+	// InferBaseErrorShape returns the error shape (defaults to string)
+	type SimpleErrorShape = InferBaseErrorShape<typeof simpleResult.config>;
+	expectTypeOf<SimpleErrorShape>().toEqualTypeOf<any>();
+
+	// InferCustomFormMetadata returns the custom form metadata extension (empty by default)
+	type SimpleFormExt = InferCustomFormMetadata<typeof simpleResult.config>;
+	expectTypeOf<SimpleFormExt>().toEqualTypeOf<{}>();
+
+	// InferCustomFieldMetadata returns the custom field metadata extension (empty by default)
+	type SimpleFieldExt = InferCustomFieldMetadata<typeof simpleResult.config>;
+	expectTypeOf<SimpleFieldExt>().toEqualTypeOf<{}>();
+
+	// Test with custom error shape
+	const errorShapeResult = configureForms({
+		isError: shape<{ message: string; code: string }>(),
+	});
+
+	type CustomErrorShape = InferBaseErrorShape<typeof errorShapeResult.config>;
+	expectTypeOf<CustomErrorShape>().toEqualTypeOf<{
+		message: string;
+		code: string;
+	}>();
+
+	// Test with custom form metadata extension
+	const formMetadataResult = configureForms({
+		extendFormMetadata(metadata) {
+			return {
+				get customFormProp() {
+					return `custom-${metadata.id}`;
+				},
+			};
+		},
+	});
+
+	type CustomFormExt = InferCustomFormMetadata<
+		typeof formMetadataResult.config
+	>;
+	expectTypeOf<CustomFormExt>().not.toBeNever();
+	expectTypeOf<CustomFormExt['customFormProp']>().toEqualTypeOf<string>();
+
+	// Test with custom field metadata extension
+	const fieldMetadataResult = configureForms({
+		extendFieldMetadata(metadata) {
+			return {
+				get inputProps() {
+					return {
+						name: metadata.name,
+						required: metadata.required,
+					};
+				},
+			};
+		},
+	});
+
+	type CustomFieldExt = InferCustomFieldMetadata<
+		typeof fieldMetadataResult.config
+	>;
+	expectTypeOf<CustomFieldExt>().not.toBeNever();
+	expectTypeOf<CustomFieldExt['inputProps']>().not.toBeNever();
+
+	// Test composing with FormMetadata, FieldMetadata, and Fieldset
+	// This is the main use case: users can define reusable types for components
+	type TestSchema = { name: string; email: string };
+
+	type MyFormMetadata = FormMetadata<
+		InferBaseErrorShape<typeof fieldMetadataResult.config>,
+		InferCustomFormMetadata<typeof fieldMetadataResult.config>,
+		InferCustomFieldMetadata<typeof fieldMetadataResult.config>
+	>;
+
+	type MyFieldMetadata<T> = FieldMetadata<
+		T,
+		InferBaseErrorShape<typeof fieldMetadataResult.config>,
+		InferCustomFieldMetadata<typeof fieldMetadataResult.config>
+	>;
+
+	type MyFieldset<T> = Fieldset<
+		T,
+		InferBaseErrorShape<typeof fieldMetadataResult.config>,
+		InferCustomFieldMetadata<typeof fieldMetadataResult.config>
+	>;
+
+	// Verify composed types have the custom properties
+	expectTypeOf<MyFormMetadata['id']>().toBeString();
+
+	// MyFieldMetadata should have the custom inputProps
+	expectTypeOf<MyFieldMetadata<string>['inputProps']>().not.toBeNever();
+	expectTypeOf<MyFieldMetadata<string>['name']>().toBeString();
+
+	// MyFieldset fields should also have inputProps
+	expectTypeOf<MyFieldset<TestSchema>['name']['inputProps']>().not.toBeNever();
+	expectTypeOf<MyFieldset<TestSchema>['email']['inputProps']>().not.toBeNever();
+
+	// getFieldset() should return Fieldset with custom metadata preserved
+	// Test by creating a mock field and calling getFieldset with explicit type
+	const mockField = {} as MyFieldMetadata<TestSchema>;
+	const fieldset = mockField.getFieldset();
+	// The returned fieldset's fields should have the custom inputProps
+	expectTypeOf(fieldset.name.inputProps).not.toBeNever();
+	expectTypeOf(fieldset.email.inputProps).not.toBeNever();
+
+	// getFieldList() should return FieldMetadata[] with custom metadata preserved
+	type ListSchema = Array<{ title: string }>;
+	type ItemMetadata = ReturnType<
+		MyFieldMetadata<ListSchema>['getFieldList']
+	>[number];
+	expectTypeOf<ItemMetadata['inputProps']>().not.toBeNever();
+});

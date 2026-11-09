@@ -1,0 +1,216 @@
+import {shadowValue, shadowToken} from './shadowToken.js'
+
+const tokenValue = {
+  color: '#000000',
+  alpha: 0.5,
+  offsetX: {value: 4, unit: 'px'},
+  offsetY: {value: 4, unit: 'px'},
+  blur: {value: 2, unit: 'px'},
+  spread: {value: 2, unit: 'px'},
+  inset: false,
+}
+
+describe('Schema: shadowValue', () => {
+  it('parses valid shadow value', () => {
+    expect(shadowValue.safeParse(tokenValue).success).toStrictEqual(true)
+    // without inset
+    expect(
+      shadowValue.safeParse({
+        color: '#000000',
+        alpha: 0.5,
+        offsetX: {value: 4, unit: 'px'},
+        offsetY: {value: 4, unit: 'px'},
+        blur: {value: 2, unit: 'px'},
+        spread: {value: 2, unit: 'px'},
+      }).success,
+    ).toStrictEqual(true)
+  })
+
+  it('parses shadow with zero values', () => {
+    expect(
+      shadowValue.safeParse({
+        color: '#000000',
+        alpha: 0.5,
+        offsetX: {value: 0, unit: 'px'},
+        offsetY: {value: 0, unit: 'px'},
+        blur: {value: 0, unit: 'px'},
+        spread: {value: 0, unit: 'px'},
+      }).success,
+    ).toStrictEqual(true)
+  })
+
+  it('parses shadow with negative values', () => {
+    expect(
+      shadowValue.safeParse({
+        color: '#000000',
+        alpha: 0.5,
+        offsetX: {value: -4, unit: 'px'},
+        offsetY: {value: -4, unit: 'px'},
+        blur: {value: 2, unit: 'px'},
+        spread: {value: -2, unit: 'px'},
+      }).success,
+    ).toStrictEqual(true)
+  })
+
+  it('fails on legacy string format', () => {
+    expect(
+      shadowValue.safeParse({
+        color: '#000000',
+        alpha: 0.5,
+        offsetX: '4px',
+        offsetY: '4px',
+        blur: '2px',
+        spread: '2px',
+      }).success,
+    ).toStrictEqual(false)
+  })
+
+  it('fails on invalid properties', () => {
+    // additional element
+    expect(
+      shadowValue.safeParse({
+        ...tokenValue,
+        additional: 1000,
+      }).success,
+    ).toStrictEqual(false)
+  })
+
+  it('fails on missing properties', () => {
+    // missing color
+    expect(
+      shadowValue.safeParse({
+        alpha: 0.5,
+        offsetX: {value: 4, unit: 'px'},
+        offsetY: {value: 4, unit: 'px'},
+        blur: {value: 2, unit: 'px'},
+        spread: {value: 2, unit: 'px'},
+      }).success,
+    ).toStrictEqual(false)
+    // missing offsetX
+    expect(
+      shadowValue.safeParse({
+        color: '#000000',
+        alpha: 0.5,
+        offsetY: {value: 4, unit: 'px'},
+        blur: {value: 2, unit: 'px'},
+        spread: {value: 2, unit: 'px'},
+      }).success,
+    ).toStrictEqual(false)
+    // missing offsetY
+    expect(
+      shadowValue.safeParse({
+        color: '#000000',
+        alpha: 0.5,
+        offsetX: {value: 4, unit: 'px'},
+        blur: {value: 2, unit: 'px'},
+        spread: {value: 2, unit: 'px'},
+      }).success,
+    ).toStrictEqual(false)
+    // missing blur
+    expect(
+      shadowValue.safeParse({
+        color: '#000000',
+        alpha: 0.5,
+        offsetX: {value: 4, unit: 'px'},
+        offsetY: {value: 4, unit: 'px'},
+        spread: {value: 2, unit: 'px'},
+      }).success,
+    ).toStrictEqual(false)
+    // missing spread
+    expect(
+      shadowValue.safeParse({
+        color: '#000000',
+        alpha: 0.5,
+        offsetX: {value: 4, unit: 'px'},
+        offsetY: {value: 4, unit: 'px'},
+        blur: {value: 2, unit: 'px'},
+      }).success,
+    ).toStrictEqual(false)
+  })
+
+  it('parses shadow without alpha (optional)', () => {
+    expect(
+      shadowValue.safeParse({
+        color: '#000000',
+        offsetX: {value: 4, unit: 'px'},
+        offsetY: {value: 4, unit: 'px'},
+        blur: {value: 2, unit: 'px'},
+        spread: {value: 2, unit: 'px'},
+      }).success,
+    ).toStrictEqual(true)
+  })
+})
+
+describe('Schema: shadowToken', () => {
+  const validToken = {
+    $value: tokenValue,
+    $type: 'shadow',
+    $description: 'a shadowToken token',
+  }
+
+  it('parses valid tokens', () => {
+    expect(shadowToken.safeParse(validToken).success).toStrictEqual(true)
+  })
+
+  it('fails on invalid properties', () => {
+    // additional element
+    expect(
+      shadowValue.safeParse({
+        ...validToken,
+        additional: 1000,
+      }).success,
+    ).toStrictEqual(false)
+    // missing value
+    expect(
+      shadowValue.safeParse({
+        $type: 'shadow',
+      }).success,
+    ).toStrictEqual(false)
+  })
+
+  it('fails on wrong type', () => {
+    expect(
+      shadowToken.safeParse({
+        ...validToken,
+        $type: 'motion',
+      }).success,
+    ).toStrictEqual(false)
+    // undefined
+    expect(
+      shadowToken.safeParse({
+        ...validToken,
+        $type: undefined,
+      }).success,
+    ).toStrictEqual(false)
+    // no type
+    expect(
+      shadowToken.safeParse({
+        $value: tokenValue,
+      }).success,
+    ).toStrictEqual(false)
+  })
+
+  it('fails on wrong value', () => {
+    // invalid string
+    expect(
+      shadowValue.safeParse({
+        ...validToken,
+        $value: 100,
+      }).success,
+    ).toStrictEqual(false)
+    // undefined
+    expect(
+      shadowValue.safeParse({
+        ...validToken,
+        $value: undefined,
+      }).success,
+    ).toStrictEqual(false)
+    // false
+    expect(
+      shadowValue.safeParse({
+        ...validToken,
+        $value: false,
+      }).success,
+    ).toStrictEqual(false)
+  })
+})

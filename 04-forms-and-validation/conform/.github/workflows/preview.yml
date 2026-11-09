@@ -1,0 +1,37 @@
+name: Preview
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Release
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup pnpm and Node
+        uses: pnpm/setup@fa36a5ef7dcdefc3a7cb25655c122e00cf6e636e # v3.1.2
+        with:
+          runtime: node@22
+          cache: true
+      - name: Build packages
+        run: pnpm build
+      - name: Publish to pkg.pr.new
+        run: pnpx pkg-pr-new publish --compact './packages/*' --template './examples/*'
+
+  validate:
+    name: Validate Preview
+    needs: [release]
+    uses: ./.github/workflows/validate.yml
+    with:
+      preview: ${{ github.event.pull_request.number || github.sha }}
+      typescript: '["5.8", "7"]'

@@ -1,0 +1,388 @@
+#!/usr/bin/env node
+const path = require('path');
+const fs = require('fs/promises');
+const glob = require('glob');
+const HTMLParser = require('node-html-parser');
+const options = require('../.link-checker');
+
+async function checkLinks() {
+  const indexLineNumbers = (fileContents) => {
+    const lineBreakIndexes = [];
+    for (var i = 0; i < fileContents.length; i++) {
+      const character = fileContents.charAt(i);
+      if (character === '\n') {
+        lineBreakIndexes.push(i);
+      }
+    }
+    const getLineNumber = (htmlElement) => {
+      const elementIndex = htmlElement.range[0];
+      let lineNumber;
+      let columnNumber;
+      for (let i = 0; i < lineBreakIndexes.length; i += 1) {
+        const lineBreakIndex = lineBreakIndexes[i];
+        if (lineBreakIndex > elementIndex) {
+          lineNumber = i + 1;
+          const startOfLineIndex = i === 0 ? 0 : lineBreakIndexes[i - 1] + 1;
+          columnNumber = elementIndex - startOfLineIndex + 1;
+          break;
+        }
+      }
+      return { lineNumber, columnNumber };
+    };
+    return getLineNumber;
+  };
+
+  const getHashCheckHandler = (hrefOrSrc) => {
+    return options.hashCheckHandlers.find(({ pattern }) =>
+      pattern.test(hrefOrSrc)
+    );
+  };
+
+  const getReactPartial = (hrefOrSrc, html) => {
+    const handler = getHashCheckHandler(hrefOrSrc);
+    if (handler) return handler.getPartial(html);
+    return undefined;
+  };
+
+  const checkPathForHash = (
+    hrefOrSrc,
+    ids = [],
+    hash,
+    { reactPartial } = {}
+  ) => {
+    // On some websites, the ids may not exactly match the hash included
+    // in the link.
+    // For e.g. GitHub will prepend client facing ids with their own
+    // calculated value. A heading in a README for example could be
+    // 'Foo bar', navigated to with https://github.com/foo/bar#foo-bar,
+    // but GitHub calculates the actual markup id included in the document
+    // as being 'user-content-foo-bar' for its own page processing purposes.
+    //
+    // See https://github.com/w3c/aria-practices/issues/2809
+    const handler = getHashCheckHandler(hrefOrSrc);
+    if (handler) return handler.matchHash(ids, hash, { reactPartial });
+    else return ids.includes(hash);
+  };
+
+  const countConsoleErrors = () => {
+    let errorCount = 0;
+
+    const getErrorCount = () => errorCount;
+
+    const consoleError = (...args) => {
+      errorCount += 1;
+      console.error(...args);
+    };
+
+    return { consoleError, getErrorCount };
+  };
+
+  const htmlPaths = glob
+    .sync('content/**/*.html', {
+      cwd: path.join(__dirname, '..'),
+    })
+    .filter((htmlPath) => !options.filesToIgnore.includes(htmlPath));
+
+  const nonHtmlPaths = glob.sync('content/**/*.!(html)', {
+    cwd: path.join(__dirname, '..'),
+  });
+
+  const allLinkData = {};
+  const externalPageLoaders = {};
+
+  const { specLinks } = await import('../content/shared/js/specLinks.mjs');
+  const fixSpecLink = specLinks({ specStatus: 'ED' });
+
+  const { consoleError, getErrorCount } = countConsoleErrors();
+
+  for (const htmlPath of htmlPaths) {
+    const fileContents = await fs.readFile(htmlPath, { encoding: 'utf8' });
+    const getLineNumber = indexLineNumbers(fileContents);
+    const html = HTMLParser.parse(fileContents);
+
+    const aElements = html.querySelectorAll(`a[href]`);
+    const linkElements = html.querySelectorAll('link[href]');
+    const scriptElements = html.querySelectorAll('script[src]');
+    const imgElements = html.querySelectorAll('img[src]');
+
+    // Handle feature which rewrites links to aria specs, see content/shared/js/specLinks.mjs for more info.
+    aElements.forEach(fixSpecLink);
+
+    const idElements = html.querySelectorAll('[id]');
+    const ids = idElements.map((idElement) => {
+      return idElement.getAttribute('id');
+    });
+
+    const links = [];
+
+    let elementsToCheck = [
+      ...linkElements,
+      ...aElements,
+      ...scriptElements,
+      ...imgElements,
+    ];
+
+    const excludedElements = options.excludedLinks[htmlPath]?.flatMap(
+      (excludedSelector) => {
+        return html.querySelectorAll(excludedSelector);
+      }
+    );
+
+    if (excludedElements) {
+      elementsToCheck = elementsToCheck.filter(
+        (element) => !excludedElements.includes(element)
+      );
+    }
+
+    elementsToCheck.forEach((element) => {
+      const hrefOrSrc =
+        element.getAttribute('href') ?? element.getAttribute('src');
+      const { lineNumber, columnNumber } = getLineNumber(element);
+      links.push({ hrefOrSrc, lineNumber, columnNumber });
+
+      if (hrefOrSrc.startsWith('http')) {
+        const [externalPageLink] = hrefOrSrc.split('#');
+
+        if (externalPageLoaders[externalPageLink]) {
+          return;
+        }
+
+        const getPageData = async () => {
+          const domain = new URL(externalPageLink).hostname;
+          const maxRetries = 3;
+          const baseDelay = 15;
+
+          for (let attempt = 0; attempt < maxRetries; attempt++) {
+            let step = 'fetch';
+            try {
+              const response = await fetch(externalPageLink, {
+                headers: {
+                  // Clearly identifies this as being a link checker, and links to the project repo for more info.
+                  'User-Agent':
+                    'W3C/aria-practices-link-checker (+https://github.com/w3c/aria-practices)',
+                  Accept:
+                    'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                  'Accept-Language': 'en-US,en;q=0.5',
+                  'Accept-Encoding': 'gzip, deflate, br',
+                },
+              });
+
+              // Handle rate limit-related statuses
+              if (
+                response.status === 403 ||
+                response.status === 429 ||
+                response.status === 503 ||
+                response.status === 508
+              ) {
+                throw new Error(
+                  response.status === 429
+                    ? `Rate limited by ${domain}`
+                    : `Unsuccessful response from ${domain} (${response.status})`
+                );
+              }
+
+              step = 'read body';
+              const text = await response.text();
+              step = 'parse HTML';
+              const html = HTMLParser.parse(text);
+              step = 'extract ids';
+              const ids = html
+                .querySelectorAll('[id]')
+                .map((idElement) => idElement.getAttribute('id'));
+
+              // Handle GitHub README links.
+              // These links are stored within a react-partial element
+              step = 'getReactPartial';
+              const reactPartial = getReactPartial(hrefOrSrc, html);
+              return {
+                ok: response.ok,
+                status: response.status,
+                ids,
+                reactPartial,
+              };
+            } catch (error) {
+              if (attempt < maxRetries - 1) {
+                // Found the retry-after unit returned from response headers too
+                // variable to use here, but ~15 seconds seems like a safe
+                // initial default
+                const delay = baseDelay * 1000 * Math.pow(2, attempt);
+                console.info(
+                  `Error at step "${step}" for ${externalPageLink}: ${error.message}, retrying in ${delay}ms`
+                );
+                await new Promise((resolve) => setTimeout(resolve, delay));
+                continue;
+              }
+              return {
+                errorMessage:
+                  `Found broken external link on ${htmlPath}:${lineNumber}:${columnNumber}\n` +
+                  `  ${error.stack}`,
+              };
+            }
+          }
+        };
+
+        externalPageLoaders[externalPageLink] = getPageData;
+      }
+    });
+
+    allLinkData[htmlPath] = { links, ids };
+  }
+
+  console.info(`Checked ${htmlPaths.length} source files`);
+
+  const loadingCount = Object.keys(externalPageLoaders).length;
+
+  console.info(`Checking ${loadingCount} external pages...`);
+
+  let loadedCount = 0;
+
+  let externalPageData = {};
+
+  const concurrencyLimit = 5;
+  const loaderEntries = Object.entries(externalPageLoaders);
+  for (let i = 0; i < loaderEntries.length; i += concurrencyLimit) {
+    const batch = loaderEntries.slice(i, i + concurrencyLimit);
+    await Promise.all(
+      batch.map(async ([externalPageLink, getPageData]) => {
+        const start = Date.now();
+        const pageData = await getPageData();
+        const elapsed = ((Date.now() - start) / 1000).toFixed(2);
+        externalPageData[externalPageLink] = pageData;
+        loadedCount += 1;
+        console.info(
+          `[${loadedCount}/${loadingCount}] ${externalPageLink} (${elapsed}s)`
+        );
+      })
+    );
+  }
+
+  console.info(`Checked ${loadingCount} of ${loadingCount} external pages`);
+
+  for (const [htmlPath, { links }] of Object.entries(allLinkData)) {
+    for (let { hrefOrSrc, lineNumber, columnNumber } of links) {
+      const isIgnored =
+        hrefOrSrc.startsWith('mailto') || hrefOrSrc.startsWith('javascript');
+      const isExternalLink = hrefOrSrc.startsWith('http');
+      const isRootRelativeLink = hrefOrSrc.startsWith('/');
+      const isRelativeLink = !(
+        isIgnored ||
+        isExternalLink ||
+        isRootRelativeLink
+      );
+
+      const hashIndex = hrefOrSrc.indexOf('#');
+      let hash = null;
+      let pathMinusHash;
+      if (hashIndex !== -1) {
+        hash = hrefOrSrc.substr(hashIndex + 1);
+        pathMinusHash = hrefOrSrc.substr(0, hashIndex);
+      } else {
+        pathMinusHash = hrefOrSrc;
+      }
+
+      if (isRootRelativeLink) {
+        consoleError(
+          `Found root relative link, but only relative links are allowed, ` +
+            `on ${htmlPath}:${lineNumber}:${columnNumber}`
+        );
+      }
+
+      if (isRelativeLink) {
+        const queryStringIndex = pathMinusHash.indexOf('?');
+        if (queryStringIndex !== -1) {
+          // Ignores query string
+          pathMinusHash = pathMinusHash.substr(0, queryStringIndex);
+        }
+
+        const root = path.resolve(__dirname, '../');
+        const sitePath =
+          pathMinusHash === '' ? htmlPath : path.dirname(htmlPath);
+        const absPath = path.resolve(root, sitePath, pathMinusHash);
+        let relativePath = path.relative(root, absPath);
+
+        const matchingPage = allLinkData[relativePath];
+
+        let matchesHash = true;
+        if (hash) {
+          matchesHash = !!checkPathForHash(
+            pathMinusHash,
+            matchingPage?.ids,
+            hash
+          );
+        }
+
+        const isLinkBroken = !(
+          matchingPage || nonHtmlPaths.includes(relativePath)
+        );
+
+        if (isLinkBroken) {
+          consoleError(
+            `Found broken link on ${htmlPath}:${lineNumber}:${columnNumber}`
+          );
+          continue;
+        }
+
+        if (!matchesHash) {
+          consoleError(
+            `Found broken hash on ${htmlPath}:${lineNumber}:${columnNumber}`
+          );
+        }
+      }
+
+      if (isExternalLink) {
+        const pageData = externalPageData[pathMinusHash];
+        if (!pageData) {
+          throw new Error(
+            `Expected external page data to have loaded for ${pathMinusHash}`
+          );
+        }
+
+        if (pageData.errorMessage) {
+          consoleError(pageData.errorMessage);
+          continue;
+        }
+
+        if (!pageData.ok) {
+          consoleError(
+            `Found broken external link on ${htmlPath}:${lineNumber}:${columnNumber}. ` +
+              `Link is ${hrefOrSrc}, ` +
+              `status is ${pageData.status}`
+          );
+          continue;
+        }
+
+        const isHashCheckingDisabled =
+          !!options.ignoreHashesOnExternalPagesMatchingRegex.find((pattern) =>
+            hrefOrSrc.match(pattern)
+          );
+
+        if (
+          !isHashCheckingDisabled &&
+          hash &&
+          !checkPathForHash(hrefOrSrc, pageData.ids, hash, {
+            reactPartial: pageData.reactPartial,
+          })
+        ) {
+          consoleError(
+            `Found broken external link on ${htmlPath}:${lineNumber}:${columnNumber}, ` +
+              `hash "#${hash}" not found on page`
+          );
+        }
+      }
+    }
+  }
+
+  const errorCount = getErrorCount();
+  const output = `Link checker found ${errorCount} broken link${
+    errorCount === 1 ? '' : 's'
+  }`;
+
+  const failed = errorCount !== 0;
+  if (failed) {
+    console.error(output);
+    process.exit(1);
+  }
+  console.info(output);
+}
+
+checkLinks();

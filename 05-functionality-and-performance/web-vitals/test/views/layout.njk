@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<!--
+ Copyright 2020 Google LLC
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+     https://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+-->
+<html lang="en" {% if invisible or hidden %}hidden{% endif %}>
+<head>
+  <meta charset="utf-8">
+  <title>Web Vitals Test</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script>
+    (function() {
+      /**
+       * @param {string} visibilityState
+       * @return {void}
+       */
+      self.__stubVisibilityState = (visibilityState) => {
+        if (visibilityState === 'hidden') {
+          Object.defineProperty(document, 'visibilityState', {
+            value: visibilityState,
+            configurable: true,
+          });
+          document.documentElement.hidden = true;
+        } else {
+          delete document.visibilityState;
+          document.documentElement.hidden = false;
+        }
+      }
+
+      /**
+       * @param {string} visibilityState
+       * @return {void}
+       */
+      self.__stubVisibilityChange = (visibilityState) => {
+        self.__stubVisibilityState(visibilityState);
+        document.dispatchEvent(new Event('visibilitychange'));
+      }
+
+      /**
+       * @param {string} visibilityStateAfterRestore
+       * @return {Promise<void>}
+       */
+      self.__stubForwardBack = (visibilityStateAfterRestore) => {
+        return new Promise((resolve) => {
+          self.dispatchEvent(new PageTransitionEvent('pagehide', {
+            persisted: true,
+          }));
+          self.__stubVisibilityChange('hidden');
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              if (visibilityStateAfterRestore !== 'hidden') {
+                self.__stubVisibilityChange('visible');
+              }
+              self.dispatchEvent(new PageTransitionEvent('pageshow', {
+                persisted: true,
+              }));
+              resolve();
+            });
+          });
+        });
+      }
+
+      /**
+       * @return {Promise<void>}
+       */
+      self.__stubWasDiscarded = () => {
+        return new Promise((resolve) => {
+          // Only stub if the page isn't actually discarded.
+          if (!document.wasDiscarded) {
+            Object.defineProperty(document, 'wasDiscarded', {
+              value: true,
+              configurable: true,
+            });
+          }
+        });
+      }
+
+      /**
+       * @return {Promise<void>}
+       */
+      self.__afterLoad = new Promise((resolve) => {
+        if (document.readyState === 'complete') {
+          resolve();
+        } else {
+          addEventListener('load', resolve);
+        }
+      });
+
+      /**
+       * @return {Promise<void>}
+       */
+      self.__afterElementsRendered = new Promise((resolve) => {
+        addEventListener('DOMContentLoaded', () => {
+          if (PerformanceObserver.supportedEntryTypes.includes('element')) {
+            const nodes = new Set([...document.querySelectorAll('[elementtiming]:not([hidden])')]);
+            if (nodes.size === 0 || !PerformanceObserver.supportedEntryTypes.includes('element')) {
+              resolve();
+            }
+            new PerformanceObserver((list) => {
+              for (const entry of list.getEntries()) {
+                if (nodes.has(entry.element)) {
+                  nodes.delete(entry.element);
+                }
+              }
+              if (nodes.size === 0) {
+                resolve();
+              }
+            }).observe({type: 'element', buffered: true});
+          } else {
+            self.__afterLoad.then(() => {
+              requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                  resolve();
+                });
+              });
+            });
+          }
+        }, true);
+      });
+
+      /**
+       * @return {Promise<void>}
+       */
+      self.__afterFirstInput = new Promise((resolve) => {
+        new PerformanceObserver(resolve).observe({type: 'first-input', buffered: true});
+      });
+
+      // Uncomment to stub running in a browser that doesn't support performance APIs
+      // (e.g. some version of Opera support this).
+      // delete self.performance;
+
+      const params = new URL(location.href).searchParams;
+
+      function infer(param) {
+        const val = params.get(param);
+
+        if (val) {
+          if (val.match(/^\d+$/)) {
+            return Number(val);
+          } else if (val.match(/^(true|false)$/)) {
+            return val === 'false' ? false : true;
+          }
+          return val;
+        }
+      }
+
+      self.__reportAllChanges = Boolean(infer('reportAllChanges'));
+      self.__reportSoftNavs = Boolean(infer('reportSoftNavs'));
+      self.__delayURLupdate = Boolean(infer('delayURLupdate'));
+      self.__durationThreshold = infer('durationThreshold');
+      self.__generateTarget = infer('generateTarget');
+      self.__includeProcessedEventEntries = infer('includeProcessedEventEntries');
+      self.__resourceBufferSize = infer('resourceBufferSize');
+
+      self.__doubleCall = Boolean(infer('doubleCall'));
+      self.__reportAllChanges2 = Boolean(infer('reportAllChanges2'));
+      self.__reportSoftNavs2 = Boolean(infer('reportSoftNavs2'));
+      self.__delayURLupdate2 = Boolean(infer('delayURLupdate2'));
+      self.__durationThreshold2 = infer('durationThreshold2');
+      self.__generateTarget2 = infer('generateTarget2');
+
+      self.__lazyLoad = Boolean(infer('lazyLoad'));
+      self.__loadAfterInput = Boolean(infer('loadAfterInput'));
+      self.__registerOnVisibilityChange = Boolean(infer('registerOnVisibilityChange'));
+      self.__batchReporting = Boolean(infer('batchReporting'));
+      self.__removeElement = Boolean(infer('removeElement'));
+
+      if (params.has('hidden')) {
+        // Stub the page being loaded in the hidden state, but defer to the
+        // native state if the `visibilitychange` event fires.
+        Object.defineProperty(document, 'visibilityState', {
+          value: 'hidden',
+          configurable: true,
+        });
+        // We need to overload getEntriesByType to return an initial hidden
+        // state for prerender.
+        // We should also really add entries on visibiltychange, but we
+        // only use initial entries, so no need.
+        const originalGetEntriesByType =
+          window.performance.getEntriesByType.bind(performance);
+
+        window.performance.getEntriesByType = function(type) {
+          const entries = originalGetEntriesByType(type);
+          if (type === 'visibility-state' && entries.length > 0) {
+            const modifiedEntries = [...entries];
+            modifiedEntries[0] = {
+              name: 'hidden',
+              entryType: 'visibility-state',
+              startTime: 0,
+              duration: 0
+            };
+            return modifiedEntries;
+          }
+          return entries;
+        };
+        addEventListener('visibilitychange', (event) => {
+          if (event.isTrusted) {
+            delete document.visibilityState;
+          }
+        }, true);
+      }
+
+      if (params.has('wasDiscarded')) {
+        self.__stubWasDiscarded();
+      }
+
+      // Push to this promise list if you need to wait for some condition in a test.
+      self.__readyPromises = [];
+
+      // If `__lazyLoad` is set, wait to import until after load and first paint.
+      if (self.__lazyLoad) {
+        self.__readyPromises.push(self.__afterLoad, self.__afterElementsRendered);
+      }
+
+      if (self.__loadAfterInput) {
+        self.__readyPromises.push(self.__afterFirstInput);
+      }
+
+
+      document.nav=parseInt(window.location.hash.substring(1)) || 1;
+
+      document.addEventListener("DOMContentLoaded", (event) => {
+        const main=document.querySelector('main');
+
+        function loadPage(page) {
+          if (self.__delayURLupdate) {
+            setTimeout(() => {
+              window.history.pushState({}, '', location.protocol+'//'+location.host+location.pathname + '#' + document.nav);
+            }, 1000)
+          } else {
+            window.history.pushState({}, '', location.protocol+'//'+location.host+location.pathname + '#' + document.nav);
+          }
+          document.getElementById('softnav-title').innerText = "Page " + document.nav;
+
+          const newDiv = document.createElement("div");
+          // To test LCP images:
+          //   - set below code to "=== 2"
+          //   - comment out the image above
+          //   - start from first page (not middle of a soft nav)
+          // To test reusing a cached resource do above and
+          //   - uncomment the one with width and height of 100
+          if (document.nav === 2) {
+            const newImage = new Image();
+            newImage.src = `./img/square.png?delay=600&nav=${document.nav}`
+            newDiv.appendChild(newImage);
+          }
+
+          const newParagraph = document.createElement("p");
+          newParagraph.innerText = document.nav + ' Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum';
+          newDiv.appendChild(newParagraph);
+
+          const currentDiv = document.getElementById("softnav-paragraph");
+          main.insertBefore(newDiv, currentDiv);
+        }
+
+        function doSoftNav() {
+          document.nav++;
+          loadPage(document.nav);
+        }
+
+        document.getElementById('soft-nav').addEventListener(
+          'click', doSoftNav, true
+        );
+      });
+
+      // Import a module and automatically add that to the list of ready promises.
+      self.__testImport = async (modulePath) => {
+        await Promise.all(self.__readyPromises);
+
+        const importPromise = import(modulePath);
+        self.__readyPromises.push(importPromise);
+
+        importPromise.then(() => {
+          self.__isWebVitalsLoaded = true;
+        });
+
+        return await importPromise;
+      };
+
+      self.__toSafeObject = (oldObj) =>  {
+        if (oldObj === null || typeof oldObj !== 'object') {
+          return oldObj;
+        } else if (oldObj instanceof EventTarget) {
+          return oldObj.toString();
+        }
+        const newObj = {};
+        for (let key in oldObj) {
+          const value = oldObj[key];
+          if (typeof value === 'function') continue;
+
+          newObj[key] = Array.isArray(value)
+            ? value.map(__toSafeObject)
+            : __toSafeObject(value);
+        }
+        return newObj;
+      };
+
+    }());
+  </script>
+  {% block head %}{% endblock %}
+  {% if renderBlocking %}
+    <link rel="stylesheet" href="/test/css/styles.css?delay={{ renderBlocking }}">
+  {% endif %}
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    *[hidden] {
+      visibility: hidden;
+    }
+    body {
+      font: 1em/1.5 sans-serif;
+      margin: 0;
+    }
+    main {
+      border: 1px solid transparent; /* Prevent margin collapsing */
+      min-height: 100vh;
+      padding: 0 1em;
+      position: relative;
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  {% if delayDCL %}
+    <script defer src="/test/script/defer.js?delay={{ delayDCL }}"></script>
+  {% endif %}
+
+  {% if delayLoad %}
+    <script async src="/test/script/async.js?delay={{ delayLoad }}"></script>
+  {% endif %}

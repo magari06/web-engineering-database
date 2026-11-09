@@ -1,0 +1,34 @@
+{
+  "name": "primitives-storybook",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build:preview": "npm run clean && scripts/build-storybook preview",
+    "build:prod": "npm run clean && scripts/build-storybook",
+    "clean": "rm -rf out",
+    "storybook": "storybook dev -p 6006 --ci",
+    "build-storybook": "storybook build"
+  },
+  "devDependencies": {
+    "@primer/octicons-react": "^19.16.0",
+    "@storybook/addon-a11y": "^8.6.0",
+    "@storybook/addon-essentials": "^8.6.0",
+    "@storybook/addon-links": "^8.6.0",
+    "@storybook/addon-webpack5-compiler-swc": "^1.0.0",
+    "@storybook/blocks": "^8.6.0",
+    "@storybook/react": "^8.6.0",
+    "@storybook/react-webpack5": "^8.6.0",
+    "@storybook/theming": "^8.6.0",
+    "copy-to-clipboard": "^3.3.3",
+    "esbuild": "0.25.9",
+    "storybook": "^8.6.19",
+    "storybook-addon-paddings": "^6.0.2",
+    "styled-components": "^5.3.3",
+    "typescript": "^5.5.3"
+  },
+  "dependencies": {
+    "@primer/react": "^38.0.0",
+    "react": "18.3",
+    "react-dom": "18.3"
+  }
+}

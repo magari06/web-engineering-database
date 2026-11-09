@@ -1,0 +1,1075 @@
+import React from 'react'
+import {ColorTokenSwatch} from '../../StorybookComponents/ColorTokenSwatch/ColorTokenSwatch'
+import {DataTable, Table, IssueLabel} from '@primer/react/experimental'
+import {InlineCode} from '../../StorybookComponents/InlineCode/InlineCode'
+import {getTokensByName} from '../../utilities/getTokensByName'
+import {withColorTokens, type ColorTokens} from '../../utilities/withColorTokens'
+import {formatTokenValue} from '../../utilities/formatTokenValue'
+import {Heading, Stack} from '@primer/react'
+
+export default {
+  title: 'Color/Patterns',
+  decorators: [
+    withColorTokens,
+    (Story: React.ComponentType) => (
+      <Stack direction="vertical" style={{padding: '24px'}}>
+        <Story />
+      </Stack>
+    ),
+  ],
+  parameters: {
+    controls: {hideNoControlsWarning: true},
+    options: {
+      showPanel: false,
+    },
+  },
+}
+
+export const Avatar = ({colorTokens}: {colorTokens: ColorTokens}) => {
+  const data = getTokensByName(colorTokens, 'avatar').map(token => {
+    return {
+      id: token.name,
+      ...token,
+    }
+  })
+  return (
+    <Table.Container>
+      <h1 className="sr-only" id="table-heading">
+        Avatar
+      </h1>
+      <DataTable
+        aria-labelledby="pattern"
+        data={data}
+        columns={[
+          {
+            header: 'Sample',
+            field: 'name',
+            rowHeader: true,
+            renderCell: row => {
+              return (
+                <ColorTokenSwatch
+                  bgColor={row.name.includes('bgColor') || row.name.includes('iconColor') ? row.name : undefined}
+                  textColor={row.name.includes('fgColor') ? row.name : undefined}
+                  shadowColor={row.name.includes('shadow') ? row.name : undefined}
+                  borderColor={row.name.includes('borderColor') ? row.name : undefined}
+                />
+              )
+            },
+          },
+          {
+            header: 'Token',
+            field: 'name',
+            rowHeader: true,
+            renderCell: row => {
+              return <InlineCode value={row.name} copyClipboard cssVar />
+            },
+          },
+          {
+            header: 'Output value',
+            field: 'value',
+            rowHeader: true,
+            renderCell: row => {
+              return <p>{formatTokenValue(row.value)}</p>
+            },
+          },
+        ]}
+      />
+    </Table.Container>
+  )
+}
+
+export const Control = ({colorTokens}: {colorTokens: ColorTokens}) => {
+  const control = getTokensByName(colorTokens, 'control').map(token => {
+    return {
+      id: token.name,
+      ...token,
+    }
+  })
+
+  const controlKnob = getTokensByName(colorTokens, 'controlKnob').map(token => {
+    return {
+      id: token.name,
+      ...token,
+    }
+  })
+
+  const controlTrack = getTokensByName(colorTokens, 'controlTrack').map(token => {
+    return {
+      id: token.name,
+      ...token,
+    }
+  })
+
+  const data = control.concat(controlKnob, controlTrack).map((item, index) => ({
+    ...item,
+    index,
+  }))
+  return (
+    <Table.Container>
+      <h1 className="sr-only" id="table-heading">
+        Control
+      </h1>
+      <DataTable
+        aria-labelledby="pattern"
+        data={data}
+        columns={[
+          {
+            header: 'Sample',
+            field: 'name',
+            rowHeader: true,
+            renderCell: row => {
+              return (
+                <ColorTokenSwatch
+                  bgColor={row.name.includes('bgColor') || row.name.includes('iconColor') ? row.name : undefined}
+                  textColor={row.name.includes('fgColor') ? row.name : undefined}
+                  shadowColor={row.name.includes('shadow') ? row.name : undefined}
+                  borderColor={row.name.includes('borderColor') ? row.name : undefined}
+                />
+              )
+            },
+          },
+          {
+            header: 'Token',
+            field: 'name',
+            rowHeader: true,
+            renderCell: row => {
+              return <InlineCode value={row.name} copyClipboard cssVar />
+            },
+          },
+          {
+            header: 'Output value',
+            field: 'value',
+            rowHeader: true,
+            renderCell: row => {
+              return <p>{formatTokenValue(row.value)}</p>
+            },
+          },
+        ]}
+      />
+    </Table.Container>
+  )
+}
+
+export const Counter = ({colorTokens}: {colorTokens: ColorTokens}) => {
+  const data = getTokensByName(colorTokens, 'counter').map(token => {
+    return {
+      id: token.name,
+      ...token,
+    }
+  })
+  return (
+    <Table.Container>
+      <h1 className="sr-only" id="table-heading">
+        Counter
+      </h1>
+      <DataTable
+        aria-labelledby="pattern"
+        data={data}
+        columns={[
+          {
+            header: 'Sample',
+            field: 'name',
+            rowHeader: true,
+            renderCell: row => {
+              return (
+                <ColorTokenSwatch
+                  bgColor={row.name.includes('bgColor') || row.name.includes('iconColor') ? row.name : undefined}
+                  textColor={row.name.includes('fgColor') ? row.name : undefined}
+                  shadowColor={row.name.includes('shadow') ? row.name : undefined}
+                  borderColor={row.name.includes('borderColor') ? row.name : undefined}
+                />
+              )
+            },
+          },
+          {
+            header: 'Token',
+            field: 'name',
+            rowHeader: true,
+            renderCell: row => {
+              return <InlineCode value={row.name} copyClipboard cssVar />
+            },
+          },
+          {
+            header: 'Output value',
+            field: 'value',
+            rowHeader: true,
+            renderCell: row => {
+              return <p>{formatTokenValue(row.value)}</p>
+            },
+          },
+        ]}
+      />
+    </Table.Container>
+  )
+}
+
+export const Button = ({colorTokens}: {colorTokens: ColorTokens}) => {
+  const button = getTokensByName(colorTokens, 'button').map(token => {
+    return {
+      id: token.name,
+      ...token,
+    }
+  })
+
+  const buttonCounter = getTokensByName(colorTokens, 'buttonCounter').map(token => {
+    return {
+      id: token.name,
+      ...token,
+    }
+  })
+
+  const buttonKeybindingHint = getTokensByName(colorTokens, 'buttonKeybindingHint').map(token => {
+    return {
+      id: token.name,
+      ...token,
+    }
+  })
+
+  const data = button.concat(buttonCounter, buttonKeybindingHint).map((item, index) => ({
+    ...item,
+    index,
+  }))
+  return (
+    <Table.Container>
+      <h1 className="sr-only" id="table-heading">
+        Button
+      </h1>
+      <DataTable
+        aria-labelledby="pattern"
+        data={data}
+        columns={[
+          {
+            header: 'Sample',
+            field: 'name',
+            rowHeader: true,
+            renderCell: row => {
+              return (
+                <ColorTokenSwatch
+                  bgColor={row.name.includes('bgColor') || row.name.includes('iconColor') ? row.name : undefined}
+                  textColor={row.name.includes('fgColor') ? row.name : undefined}
+                  shadowColor={row.name.includes('shadow') ? row.name : undefined}
+                  borderColor={row.name.includes('borderColor') ? row.name : undefined}
+                />
+              )
+            },
+          },
+          {
+            header: 'Token',
+            field: 'name',
+            rowHeader: true,
+            renderCell: row => {
+              return <InlineCode value={row.name} copyClipboard cssVar />
+            },
+          },
+          {
+            header: 'Output value',
+            field: 'value',
+            rowHeader: true,
+            renderCell: row => {
+              return <p>{formatTokenValue(row.value)}</p>
+            },
+          },
+        ]}
+      />
+    </Table.Container>
+  )
+}
+
+export const Focus = ({colorTokens}: {colorTokens: ColorTokens}) => {
+  const data = getTokensByName(colorTokens, 'focus-outlineColor').map(token => {
+    return {
+      id: token.name,
+      ...token,
+    }
+  })
+  return (
+    <Table.Container>
+      <h1 className="sr-only" id="table-heading">
+        Focus
+      </h1>
+      <DataTable
+        aria-labelledby="pattern"
+        data={data}
+        columns={[
+          {
+            header: 'Sample',
+            field: 'name',
+            rowHeader: true,
+            renderCell: row => {
+              return <ColorTokenSwatch outlineColor={row.name.includes('outlineColor') ? row.name : undefined} />
+            },
+          },
+          {
+            header: 'Token',
+            field: 'name',
+            rowHeader: true,
+            renderCell: row => {
+              return <InlineCode value={row.name} copyClipboard cssVar />
+            },
+          },
+          {
+            header: 'Output value',
+            field: 'value',
+            rowHeader: true,
+            renderCell: row => {
+              return <p>{formatTokenValue(row.value)}</p>
+            },
+          },
+        ]}
+      />
+    </Table.Container>
+  )
+}
+
+export const Header = ({colorTokens}: {colorTokens: ColorTokens}) => {
+  const data = getTokensByName(colorTokens, 'header').map(token => {
+    return {
+      id: token.name,
+      ...token,
+    }
+  })
+  return (
+    <Table.Container>
+      <h1 className="sr-only" id="table-heading">
+        Header
+      </h1>
+      <DataTable
+        aria-labelledby="pattern"
+        data={data}
+        columns={[
+          {
+            header: 'Sample',
+            field: 'name',
+            rowHeader: true,
+            renderCell: row => {
+              return (
+                <ColorTokenSwatch
+                  bgColor={row.name.includes('bgColor') || row.name.includes('iconColor') ? row.name : undefined}
+                  textColor={row.name.includes('fgColor') ? row.name : undefined}
+                  shadowColor={row.name.includes('shadow') ? row.name : undefined}
+                  borderColor={row.name.includes('borderColor') ? row.name : undefined}
+                />
+              )
+            },
+          },
+          {
+            header: 'Token',
+            field: 'name',
+            rowHeader: true,
+            renderCell: row => {
+              return <InlineCode value={row.name} copyClipboard cssVar />
+            },
+          },
+          {
+            header: 'Output value',
+            field: 'value',
+            rowHeader: true,
+            renderCell: row => {
+              return <p>{formatTokenValue(row.value)}</p>
+            },
+          },
+        ]}
+      />
+    </Table.Container>
+  )
+}
+
+export const Menu = ({colorTokens}: {colorTokens: ColorTokens}) => {
+  const data = getTokensByName(colorTokens, 'menu').map(token => {
+    return {
+      id: token.name,
+      ...token,
+    }
+  })
+  return (
+    <Table.Container>
+      <h1 className="sr-only" id="table-heading">
+        Menu
+      </h1>
+      <DataTable
+        aria-labelledby="pattern"
+        data={data}
+        columns={[
+          {
+            header: 'Sample',
+            field: 'name',
+            rowHeader: true,
+            renderCell: row => {
+              return (
+                <ColorTokenSwatch
+                  bgColor={row.name.includes('bgColor') || row.name.includes('iconColor') ? row.name : undefined}
+                  textColor={row.name.includes('fgColor') ? row.name : undefined}
+                  shadowColor={row.name.includes('shadow') ? row.name : undefined}
+                  borderColor={row.name.includes('borderColor') ? row.name : undefined}
+                />
+              )
+            },
+          },
+          {
+            header: 'Token',
+            field: 'name',
+            rowHeader: true,
+            renderCell: row => {
+              return <InlineCode value={row.name} copyClipboard cssVar />
+            },
+          },
+          {
+            header: 'Output value',
+            field: 'value',
+            rowHeader: true,
+            renderCell: row => {
+              return <p>{formatTokenValue(row.value)}</p>
+            },
+          },
+        ]}
+      />
+    </Table.Container>
+  )
+}
+
+export const Overlay = ({colorTokens}: {colorTokens: ColorTokens}) => {
+  const data = getTokensByName(colorTokens, 'overlay').map(token => {
+    return {
+      id: token.name,
+      ...token,
+    }
+  })
+  return (
+    <Table.Container>
+      <h1 className="sr-only" id="table-heading">
+        Overlay
+      </h1>
+      <DataTable
+        aria-labelledby="pattern"
+        data={data}
+        columns={[
+          {
+            header: 'Sample',
+            field: 'name',
+            rowHeader: true,
+            renderCell: row => {
+              return (
+                <ColorTokenSwatch
+                  bgColor={row.name.includes('bgColor') || row.name.includes('iconColor') ? row.name : undefined}
+                  textColor={row.name.includes('fgColor') ? row.name : undefined}
+                  shadowColor={row.name.includes('shadow') ? row.name : undefined}
+                  borderColor={row.name.includes('borderColor') ? row.name : undefined}
+                />
+              )
+            },
+          },
+          {
+            header: 'Token',
+            field: 'name',
+            rowHeader: true,
+            renderCell: row => {
+              return <InlineCode value={row.name} copyClipboard cssVar />
+            },
+          },
+          {
+            header: 'Output value',
+            field: 'value',
+            rowHeader: true,
+            renderCell: row => {
+              return <p>{formatTokenValue(row.value)}</p>
+            },
+          },
+        ]}
+      />
+    </Table.Container>
+  )
+}
+
+export const SelectMenu = ({colorTokens}: {colorTokens: ColorTokens}) => {
+  const data = getTokensByName(colorTokens, 'selectMenu').map(token => {
+    return {
+      id: token.name,
+      ...token,
+    }
+  })
+  return (
+    <Table.Container>
+      <h1 className="sr-only" id="table-heading">
+        SelectMenu
+      </h1>
+      <DataTable
+        aria-labelledby="pattern"
+        data={data}
+        columns={[
+          {
+            header: 'Sample',
+            field: 'name',
+            rowHeader: true,
+            renderCell: row => {
+              return (
+                <ColorTokenSwatch
+                  bgColor={row.name.includes('bgColor') || row.name.includes('iconColor') ? row.name : undefined}
+                  textColor={row.name.includes('fgColor') ? row.name : undefined}
+                  shadowColor={row.name.includes('shadow') ? row.name : undefined}
+                  borderColor={row.name.includes('borderColor') ? row.name : undefined}
+                />
+              )
+            },
+          },
+          {
+            header: 'Token',
+            field: 'name',
+            rowHeader: true,
+            renderCell: row => {
+              return <InlineCode value={row.name} copyClipboard cssVar />
+            },
+          },
+          {
+            header: 'Output value',
+            field: 'value',
+            rowHeader: true,
+            renderCell: row => {
+              return <p>{formatTokenValue(row.value)}</p>
+            },
+          },
+        ]}
+      />
+    </Table.Container>
+  )
+}
+
+export const SideNav = ({colorTokens}: {colorTokens: ColorTokens}) => {
+  const data = getTokensByName(colorTokens, 'sideNav').map(token => {
+    return {
+      id: token.name,
+      ...token,
+    }
+  })
+  return (
+    <Table.Container>
+      <h1 className="sr-only" id="table-heading">
+        SideNav
+      </h1>
+      <DataTable
+        aria-labelledby="pattern"
+        data={data}
+        columns={[
+          {
+            header: 'Sample',
+            field: 'name',
+            rowHeader: true,
+            renderCell: row => {
+              return (
+                <ColorTokenSwatch
+                  bgColor={row.name.includes('bgColor') || row.name.includes('iconColor') ? row.name : undefined}
+                  textColor={row.name.includes('fgColor') ? row.name : undefined}
+                  shadowColor={row.name.includes('shadow') ? row.name : undefined}
+                  borderColor={row.name.includes('borderColor') ? row.name : undefined}
+                />
+              )
+            },
+          },
+          {
+            header: 'Token',
+            field: 'name',
+            rowHeader: true,
+            renderCell: row => {
+              return <InlineCode value={row.name} copyClipboard cssVar />
+            },
+          },
+          {
+            header: 'Output value',
+            field: 'value',
+            rowHeader: true,
+            renderCell: row => {
+              return <p>{formatTokenValue(row.value)}</p>
+            },
+          },
+        ]}
+      />
+    </Table.Container>
+  )
+}
+
+export const TimelineBadge = ({colorTokens}: {colorTokens: ColorTokens}) => {
+  const data = getTokensByName(colorTokens, 'timelineBadge').map(token => {
+    return {
+      id: token.name,
+      ...token,
+    }
+  })
+  return (
+    <Table.Container>
+      <h1 className="sr-only" id="table-heading">
+        TimelineBadge
+      </h1>
+      <DataTable
+        aria-labelledby="pattern"
+        data={data}
+        columns={[
+          {
+            header: 'Sample',
+            field: 'name',
+            rowHeader: true,
+            renderCell: row => {
+              return (
+                <ColorTokenSwatch
+                  bgColor={row.name.includes('bgColor') || row.name.includes('iconColor') ? row.name : undefined}
+                  textColor={row.name.includes('fgColor') ? row.name : undefined}
+                  shadowColor={row.name.includes('shadow') ? row.name : undefined}
+                  borderColor={row.name.includes('borderColor') ? row.name : undefined}
+                />
+              )
+            },
+          },
+          {
+            header: 'Token',
+            field: 'name',
+            rowHeader: true,
+            renderCell: row => {
+              return <InlineCode value={row.name} copyClipboard cssVar />
+            },
+          },
+          {
+            header: 'Output value',
+            field: 'value',
+            rowHeader: true,
+            renderCell: row => {
+              return <p>{formatTokenValue(row.value)}</p>
+            },
+          },
+        ]}
+      />
+    </Table.Container>
+  )
+}
+
+export const UnderlineNav = ({colorTokens}: {colorTokens: ColorTokens}) => {
+  const data = getTokensByName(colorTokens, 'underlineNav').map(token => {
+    return {
+      id: token.name,
+      ...token,
+    }
+  })
+  return (
+    <Table.Container>
+      <h1 className="sr-only" id="table-heading">
+        UnderlineNav
+      </h1>
+      <DataTable
+        aria-labelledby="table-heading"
+        data={data}
+        columns={[
+          {
+            header: 'Sample',
+            field: 'name',
+            rowHeader: true,
+            renderCell: row => {
+              return (
+                <ColorTokenSwatch
+                  bgColor={row.name.includes('bgColor') || row.name.includes('iconColor') ? row.name : undefined}
+                  textColor={row.name.includes('fgColor') ? row.name : undefined}
+                  shadowColor={row.name.includes('shadow') ? row.name : undefined}
+                  borderColor={row.name.includes('borderColor') ? row.name : undefined}
+                />
+              )
+            },
+          },
+          {
+            header: 'Token',
+            field: 'name',
+            rowHeader: true,
+            renderCell: row => {
+              return <InlineCode value={row.name} copyClipboard cssVar />
+            },
+          },
+          {
+            header: 'Output value',
+            field: 'value',
+            rowHeader: true,
+            renderCell: row => {
+              return <p>{formatTokenValue(row.value)}</p>
+            },
+          },
+        ]}
+      />
+    </Table.Container>
+  )
+}
+
+export const Selection = ({colorTokens}: {colorTokens: ColorTokens}) => {
+  const data = getTokensByName(colorTokens, 'selection').map(token => {
+    return {
+      id: token.name,
+      ...token,
+    }
+  })
+  return (
+    <Table.Container>
+      <h1 className="sr-only" id="selection">
+        Text selection
+      </h1>
+      <DataTable
+        aria-labelledby="selection"
+        data={data}
+        columns={[
+          {
+            header: 'Sample',
+            field: 'name',
+            rowHeader: true,
+            renderCell: row => {
+              return (
+                <ColorTokenSwatch
+                  selectionColor={row.name.includes('bgColor') || row.name.includes('iconColor') ? row.name : undefined}
+                />
+              )
+            },
+          },
+          {
+            header: 'Token',
+            field: 'name',
+            rowHeader: true,
+            renderCell: row => {
+              return <InlineCode value={row.name} copyClipboard cssVar />
+            },
+          },
+          {
+            header: 'Output value',
+            field: 'value',
+            rowHeader: true,
+            renderCell: row => {
+              return <p>{formatTokenValue(row.value)}</p>
+            },
+          },
+        ]}
+      />
+    </Table.Container>
+  )
+}
+
+export const Tooltip = ({colorTokens}: {colorTokens: ColorTokens}) => {
+  const data = getTokensByName(colorTokens, 'tooltip').map(token => {
+    return {
+      id: token.name,
+      ...token,
+    }
+  })
+  return (
+    <Table.Container>
+      <h1 className="sr-only" id="tooltip">
+        Tooltip
+      </h1>
+      <DataTable
+        aria-labelledby="tooltip"
+        data={data}
+        columns={[
+          {
+            header: 'Sample',
+            field: 'name',
+            rowHeader: true,
+            renderCell: row => {
+              return (
+                <ColorTokenSwatch
+                  bgColor={row.name.includes('bgColor') || row.name.includes('iconColor') ? row.name : undefined}
+                  textColor={row.name.includes('fgColor') ? row.name : undefined}
+                  shadowColor={row.name.includes('shadow') ? row.name : undefined}
+                  borderColor={row.name.includes('borderColor') ? row.name : undefined}
+                />
+              )
+            },
+          },
+          {
+            header: 'Token',
+            field: 'name',
+            rowHeader: true,
+            renderCell: row => {
+              return <InlineCode value={row.name} copyClipboard cssVar />
+            },
+          },
+          {
+            header: 'Output value',
+            field: 'value',
+            rowHeader: true,
+            renderCell: row => {
+              return <p>{formatTokenValue(row.value)}</p>
+            },
+          },
+        ]}
+      />
+    </Table.Container>
+  )
+}
+
+export const Treeview = ({colorTokens}: {colorTokens: ColorTokens}) => {
+  const data = getTokensByName(colorTokens, 'treeViewItem').map(token => {
+    return {
+      id: token.name,
+      ...token,
+    }
+  })
+  return (
+    <Table.Container>
+      <h1 className="sr-only" id="treeViewItem">
+        Treeview
+      </h1>
+      <DataTable
+        aria-labelledby="treeViewItem"
+        data={data}
+        columns={[
+          {
+            header: 'Sample',
+            field: 'name',
+            rowHeader: true,
+            renderCell: row => {
+              return (
+                <ColorTokenSwatch
+                  bgColor={row.name.includes('bgColor') || row.name.includes('iconColor') ? row.name : undefined}
+                  textColor={row.name.includes('fgColor') ? row.name : undefined}
+                  shadowColor={row.name.includes('shadow') ? row.name : undefined}
+                  borderColor={row.name.includes('borderColor') ? row.name : undefined}
+                />
+              )
+            },
+          },
+          {
+            header: 'Token',
+            field: 'name',
+            rowHeader: true,
+            renderCell: row => {
+              return <InlineCode value={row.name} copyClipboard cssVar />
+            },
+          },
+          {
+            header: 'Output value',
+            field: 'value',
+            rowHeader: true,
+            renderCell: row => {
+              return <p>{formatTokenValue(row.value)}</p>
+            },
+          },
+        ]}
+      />
+    </Table.Container>
+  )
+}
+
+export const ContributionGraph = ({colorTokens}: {colorTokens: ColorTokens}) => {
+  const data = getTokensByName(colorTokens, 'contribution').map(token => {
+    return {
+      id: token.name,
+      ...token,
+    }
+  })
+  return (
+    <Table.Container>
+      <h1 className="sr-only" id="contribution">
+        Contribution graph
+      </h1>
+      <DataTable
+        aria-labelledby="contribution"
+        data={data}
+        columns={[
+          {
+            header: 'Sample',
+            field: 'name',
+            rowHeader: true,
+            renderCell: row => {
+              return (
+                <ColorTokenSwatch
+                  bgColor={row.name.includes('bgColor') || row.name.includes('iconColor') ? row.name : undefined}
+                  textColor={row.name.includes('fgColor') ? row.name : undefined}
+                  shadowColor={row.name.includes('shadow') ? row.name : undefined}
+                  borderColor={row.name.includes('borderColor') ? row.name : undefined}
+                />
+              )
+            },
+          },
+          {
+            header: 'Token',
+            field: 'name',
+            rowHeader: true,
+            renderCell: row => {
+              return <InlineCode value={row.name} copyClipboard cssVar />
+            },
+          },
+          {
+            header: 'Output value',
+            field: 'value',
+            rowHeader: true,
+            renderCell: row => {
+              return <p>{formatTokenValue(row.value)}</p>
+            },
+          },
+        ]}
+      />
+    </Table.Container>
+  )
+}
+
+const labelStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  padding: '2px 8px',
+  borderRadius: '2em',
+  fontSize: '12px',
+  fontWeight: 500,
+  lineHeight: '18px',
+  whiteSpace: 'nowrap',
+  cursor: 'pointer',
+  textDecoration: 'none',
+  userSelect: 'none',
+}
+
+type InteractionState = 'rest' | 'hover' | 'active'
+
+function LabelChip({color, withBorder}: {color: string; withBorder?: boolean}) {
+  const [state, setState] = React.useState<InteractionState>('rest')
+
+  const bg =
+    state === 'active'
+      ? `var(--label-${color}-bgColor-active)`
+      : state === 'hover'
+        ? `var(--label-${color}-bgColor-hover)`
+        : `var(--label-${color}-bgColor-rest)`
+
+  const fg =
+    state === 'active'
+      ? `var(--label-${color}-fgColor-active)`
+      : state === 'hover'
+        ? `var(--label-${color}-fgColor-hover)`
+        : `var(--label-${color}-fgColor-rest)`
+
+  // Border only shown on the resting state of the bordered variant
+  const boxShadow = withBorder && state === 'rest' ? `inset 0 0 0 1px var(--label-${color}-borderColor)` : undefined
+
+  return (
+    <span
+      style={{...labelStyle, backgroundColor: bg, color: fg, boxShadow}}
+      onMouseEnter={() => setState('hover')}
+      onMouseLeave={() => setState('rest')}
+      onMouseDown={() => setState('active')}
+      onMouseUp={() => setState('hover')}
+    >
+      {color}
+    </span>
+  )
+}
+
+export const Label = ({colorTokens}: {colorTokens: ColorTokens}) => {
+  const data = getTokensByName(colorTokens, 'label').map(token => {
+    return {
+      id: token.name,
+      ...token,
+    }
+  })
+  const colors = [...new Set(data.map(({id}) => id.replace(/label-([a-zA-Z0-9]+)-.*/, '$1')))]
+
+  return (
+    <>
+      <h1 id="label">Labels</h1>
+      <Stack direction="vertical" gap="spacious" style={{paddingTop: '24px', paddingBottom: '24px'}}>
+        <div>
+          <Heading as="h2" variant="small" style={{paddingBottom: '16px'}}>
+            Default (hover &amp; click me)
+          </Heading>
+          <Stack direction="horizontal" gap="condensed" wrap="wrap">
+            {colors.map(color => (
+              <LabelChip key={color} color={color} />
+            ))}
+          </Stack>
+        </div>
+
+        <div>
+          <Heading as="h2" variant="small">
+            With border (hover &amp; click me)
+          </Heading>
+          <Stack direction="horizontal" gap="condensed" wrap="wrap">
+            {colors.map(color => (
+              <LabelChip key={color} color={color} withBorder />
+            ))}
+          </Stack>
+        </div>
+      </Stack>
+      <Table.Container>
+        <DataTable
+          aria-labelledby="label"
+          data={data}
+          columns={[
+            {
+              header: 'Sample',
+              field: 'name',
+              rowHeader: true,
+              renderCell: row => {
+                return (
+                  <ColorTokenSwatch
+                    bgColor={row.name.includes('bgColor') || row.name.includes('iconColor') ? row.name : undefined}
+                    textColor={row.name.includes('fgColor') ? row.name : undefined}
+                    shadowColor={row.name.includes('shadow') ? row.name : undefined}
+                    borderColor={row.name.includes('borderColor') ? row.name : undefined}
+                  />
+                )
+              },
+            },
+            {
+              header: 'Token',
+              field: 'name',
+              renderCell: row => {
+                return <InlineCode value={row.name} copyClipboard cssVar />
+              },
+            },
+            {
+              header: 'Output value',
+              field: 'value',
+              rowHeader: true,
+              renderCell: row => {
+                return <p>{formatTokenValue(row.value)}</p>
+              },
+            },
+          ]}
+        />
+      </Table.Container>
+    </>
+  )
+}
+
+export const Syntax = ({colorTokens}: {colorTokens: ColorTokens}) => {
+  const data = getTokensByName(colorTokens, 'color').map(token => {
+    return {
+      id: token.name,
+      ...token,
+    }
+  })
+
+  return (
+    <Table.Container>
+      <h1 className="sr-only" id="ansi">
+        Syntax Colors
+      </h1>
+      <DataTable
+        aria-labelledby="contribution"
+        data={data}
+        columns={[
+          {
+            header: 'Sample',
+            field: 'name',
+            rowHeader: true,
+            renderCell: row => {
+              return <ColorTokenSwatch bgColor={row.name} />
+            },
+          },
+          {
+            header: 'Token',
+            field: 'name',
+            rowHeader: true,
+            renderCell: row => {
+              return <InlineCode value={row.name} copyClipboard cssVar />
+            },
+          },
+          {
+            header: 'Output value',
+            field: 'value',
+            rowHeader: true,
+            renderCell: row => {
+              return <p>{formatTokenValue(row.value)}</p>
+            },
+          },
+        ]}
+      />
+    </Table.Container>
+  )
+}

@@ -1,0 +1,28 @@
+{
+	"include": [
+		"**/*.ts",
+		"**/*.tsx",
+		".react-router/types/**/*",
+		".cloudflare/types"
+	],
+	"compilerOptions": {
+		"lib": ["DOM", "DOM.Iterable", "ES2022"],
+		"types": ["node", "vite/client", "react-syntax-highlighter"],
+		"isolatedModules": true,
+		"esModuleInterop": true,
+		"jsx": "react-jsx",
+		"module": "ES2022",
+		"moduleResolution": "Bundler",
+		"resolveJsonModule": true,
+		"target": "ES2022",
+		"strict": true,
+		"allowJs": true,
+		"forceConsistentCasingInFileNames": true,
+		"rootDirs": [".", "./.react-router/types"],
+		"paths": {
+			"~/*": ["./app/*"]
+		},
+		"skipLibCheck": true,
+		"noEmit": true
+	}
+}

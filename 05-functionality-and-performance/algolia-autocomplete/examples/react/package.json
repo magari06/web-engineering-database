@@ -1,0 +1,33 @@
+{
+  "name": "@algolia/autocomplete-example-react",
+  "description": "Autocomplete example with React",
+  "version": "1.19.12",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "start": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@algolia/autocomplete-js": "1.19.12",
+    "@algolia/autocomplete-theme-classic": "1.19.12",
+    "algoliasearch": "4.16.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@algolia/client-search": "4.16.0",
+    "@types/react": "^19.0.7",
+    "@types/react-dom": "^19.0.3",
+    "@vitejs/plugin-react": "4.2.1",
+    "typescript": "^4.4.2",
+    "vite": "5.0.7"
+  },
+  "keywords": [
+    "algolia",
+    "autocomplete",
+    "react"
+  ]
+}

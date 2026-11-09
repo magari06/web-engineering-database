@@ -1,0 +1,11 @@
+[
+  {
+    "name": { "property": "deprecated-token" },
+    "value": "#ffffff",
+    "uuid": "aaaaaaaa-0001-4000-8000-000000000001",
+    "lifecycle": {
+      "deprecatedIn": "3.0.0",
+      "replacedBy": "bbbbbbbb-9999-4000-8000-000000000099"
+    }
+  }
+]

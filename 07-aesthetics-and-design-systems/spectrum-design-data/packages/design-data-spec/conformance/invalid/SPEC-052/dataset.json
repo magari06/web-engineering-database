@@ -1,0 +1,34 @@
+{
+  "relationships": [
+    {
+      "scope": {
+        "component": "button",
+        "part": "capsule",
+        "property": "background-color"
+      },
+      "value": "#ff0000",
+      "uuid": "70d73e43-63f6-5f44-8e74-181c957cad3c"
+    }
+  ],
+  "components": [
+    {
+      "$id": "https://opensource.adobe.com/spectrum-design-data/schemas/v0/components/button.json",
+      "name": "button",
+      "displayName": "Button",
+      "meta": {
+        "category": "actions"
+      },
+      "anatomy": [
+        {
+          "name": "icon",
+          "description": "Leading icon."
+        },
+        {
+          "name": "label",
+          "description": "Button text.",
+          "required": true
+        }
+      ]
+    }
+  ]
+}

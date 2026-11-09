@@ -1,0 +1,98 @@
+name: Snapshots
+
+on:
+  pull_request:
+    types: [labeled]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  update-snapshots-runner:
+    if: ${{ github.event.label.name == 'update snapshots' }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci && npm run storybook:install
+      - name: Build tokens
+        run: npm run build:tokens
+      - name: Build storybook
+        working-directory: docs/storybook
+        run: |
+          npm ci --legacy-peer-deps
+          npm run build-storybook
+      - name: Run storybook
+        id: storybook
+        run: |
+          npx serve -l 6006 storybook-static &
+          pid=$!
+          echo "pid=$pid" >> $GITHUB_OUTPUT
+          sleep 5
+        working-directory: docs/storybook
+      - name: Run Visual Regression Tests
+        uses: docker://mcr.microsoft.com/playwright:v1.56.1-jammy
+        env:
+          # Tests run inside Docker while Storybook runs on the host runner.
+          # Use the Docker bridge gateway to reach the host-published port.
+          STORYBOOK_URL: 'http://172.17.0.1:6006'
+        with:
+          args: npx playwright test --update-snapshots --shard="${{ matrix.shard }}/${{ strategy.job-total }}"
+      - name: Stop storybook
+        run: kill ${{ steps.storybook.outputs.pid }}
+      - name: Create snapshots.zip
+        run: |
+          if [[ ! -z  $(git ls-files --others --exclude-standard --modified) ]]; then
+            git ls-files --others --exclude-standard --modified | zip snapshots -@
+          fi
+      - name: Upload snapshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: snapshots-${{ matrix.shard }}
+          path: snapshots.zip
+          retention-days: 1
+          if-no-files-found: ignore
+    
+  update:
+    name: 'Update snapshots'
+    needs: update-snapshots-runner
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate token
+        id: generate_token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.VRT_APP_ID }}
+          private-key: ${{ secrets.VRT_PRIVATE_KEY }}
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.head_ref }}
+          token: ${{ steps.generate_token.outputs.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          path: snapshots
+          pattern: snapshots-*
+      - run: |
+          shopt -s nullglob
+          for snapshots in snapshots/*/*.zip; do
+            unzip -o "$snapshots" -d .
+          done
+          rm -rf snapshots
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: github-actions[bot] Regenerated snapshots
+      - uses: actions-ecosystem/action-remove-labels@v1
+        if: always()
+        with:
+          labels: 'update snapshots'

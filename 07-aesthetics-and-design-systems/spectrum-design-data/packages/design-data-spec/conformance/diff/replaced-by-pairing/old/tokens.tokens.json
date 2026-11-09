@@ -1,0 +1,12 @@
+[
+  {
+    "name": { "property": "old-button-bg" },
+    "value": "#0265dc",
+    "uuid": "aaaaaaaa-0001-4000-8000-000000000001",
+    "lifecycle": {
+      "deprecatedIn": "3.0.0",
+      "deprecatedComment": "Use action-background-default instead.",
+      "replacedBy": "aaaaaaaa-0002-4000-8000-000000000001"
+    }
+  }
+]

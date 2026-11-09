@@ -1,0 +1,12 @@
+$schema: "https://moonrepo.dev/schemas/project.json"
+stack: infrastructure
+layer: tool
+id: "release-analyzer"
+
+tasks:
+  test:
+    command: [pnpm, ava, test]
+
+  dev:
+    command: [node, src/cli.js]
+    deps: []

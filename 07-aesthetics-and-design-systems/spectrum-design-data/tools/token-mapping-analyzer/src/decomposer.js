@@ -1,0 +1,975 @@
+// Copyright 2026 Adobe. All rights reserved.
+// This file is licensed to you under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License. You may obtain a copy
+// of the License at http://www.apache.org/licenses/LICENSE-2.0
+
+// Unless required by applicable law or agreed to in writing, software distributed under
+// the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+// OF ANY KIND, either express or implied. See the License for the specific language
+// governing permissions and limitations under the License.
+
+/**
+ * Fallback serialization order used when the field catalog does not provide one.
+ * Matches the positions declared in packages/design-data/fields/*.json.
+ */
+const FALLBACK_SERIALIZATION_ORDER = [
+  "variant",
+  "component",
+  "structure",
+  "substructure",
+  "anatomy",
+  "object",
+  "property",
+  "orientation",
+  "position",
+  "size",
+  "density",
+  "shape",
+  "state",
+  "role",
+  "icon",
+];
+
+/**
+ * Known compound properties that span multiple segments.
+ * These are treated as single property values.
+ *
+ * Exported for src/property-atomicity.js, which checks this list first
+ * (mirroring Phase 2 below) so a legitimate CSS compound like "text-align"
+ * isn't misread as anatomy "text" + a stray "align" segment.
+ *
+ * Matching is exact-string only, not prefix -- a new compound term used with
+ * a suffix not yet listed here (e.g. "border-width-thick") won't be exempted
+ * and its trailing segment(s) will be checked against the structural-field
+ * registries like any other property. Add the full suffixed form here if
+ * that's a false positive; this list already required the same manual
+ * enumeration before property-atomicity.js existed.
+ */
+export const COMPOUND_PROPERTIES = [
+  "font-size",
+  "font-weight",
+  "font-family",
+  "font-style",
+  "line-height",
+  "text-transform",
+  "text-align",
+  "text-decoration",
+  "corner-radius",
+  "border-width",
+  "minimum-width",
+  "minimum-height",
+  "minimum-padding-vertical",
+  "component-size-minimum-perspective",
+  "maximum-width",
+  "maximum-height",
+  "underline-gap",
+  "typography-scale",
+  "line-height-font-size",
+  "component-height",
+  "component-size-difference",
+  "component-size-maximum-perspective",
+  "component-size-width-ratio",
+  "width-multiplier",
+  "minimum-width-multiplier",
+  "maximum-width-multiplier",
+  // Registered atomic property terms whose segments happen to collide with
+  // an unrelated object/anatomy registry id -- kept atomic per bead 284.3/284.9
+  // judgment calls, not decomposition gaps. "content" is also a registered
+  // object id (header/footer-content anatomy); "square" is a registered
+  // anatomy id (opacity-checkerboard design asset).
+  "content-color",
+  "square-dark",
+  "square-light",
+  // "row" is a registered anatomy id, but "row-height" (table section header)
+  // is its own atomic sizing concept, not anatomy:"row" + property:"height".
+  "row-height",
+];
+
+/**
+ * Known terms that aren't in registries but represent recognizable concepts.
+ * These are classified as gap categories for the report rather than matched to fields.
+ */
+const KNOWN_GAP_TERMS = {
+  // Variant qualifiers — subtle, subdued, and static are now in the variant registry.
+  // Only "non" remains unregistered (used as a negation prefix, not a standalone variant).
+  "variant-qualifier": ["non"],
+};
+
+/**
+ * Known multi-segment terms that appear in token names but aren't in registries.
+ * These get matched as their target field type.
+ * Includes legacy aliases and common patterns.
+ *
+ * NOTE: focus-ring, focus-indicator, workflow-icon, and ui-icon have been
+ * moved into the anatomy-terms registry. Only state aliases remain here.
+ */
+const EXTRA_TERMS = [
+  // State aliases used in tokens (registry has keyboard-focus, tokens use key-focus)
+  { segments: ["key", "focus"], field: "state", id: "key-focus" },
+  // "with stepper" is the published phrasing for the has-stepper qualifier
+  // (number-field's hideStepper option, inverted). "with" alone isn't a
+  // registered term; this two-segment phrase is what's recognizable.
+  { segments: ["with", "stepper"], field: "qualifier", id: "has-stepper" },
+];
+
+/**
+ * Known numeric scale patterns — these are NOT t-shirt sizes
+ * but numeric index values (e.g., spacing-100, blue-900).
+ */
+const NUMERIC_SCALE_PATTERN = /^\d+$/;
+
+/**
+ * True if `endpoint` is a valid space-between gap endpoint: a registered
+ * position, a generic anatomy term, a component-declared anatomy part, or one
+ * of those glued to a registered position via a single hyphen-bounded
+ * prefix/suffix (e.g. "content-area-bottom" = anatomy "content-area" +
+ * position "bottom"). Direct port of SPEC-047's `endpoint_resolves`
+ * (sdk/core/src/validate/rules/spec047.rs) — keep the two in sync.
+ *
+ * Note: `apply.js` always has `declaredParts` populated (it loads components
+ * from the registry directly), unlike Rust's `validate-dataset`, which may run
+ * with an empty component catalog and defers rather than errors in that case.
+ * Do not port that deferral here — this function's callers never hit it.
+ *
+ * @param {string} endpoint
+ * @param {Set<string>|undefined} positionVocab
+ * @param {Set<string>|undefined} anatomyVocab
+ * @param {Set<string>} declaredParts - component-declared anatomy part names
+ * @returns {boolean}
+ */
+function endpointResolves(
+  endpoint,
+  positionVocab,
+  anatomyVocab,
+  declaredParts,
+) {
+  const isAnatomy = (s) =>
+    Boolean(anatomyVocab?.has(s)) || declaredParts.has(s);
+  const isPosition = (s) => Boolean(positionVocab?.has(s));
+
+  if (isPosition(endpoint) || isAnatomy(endpoint)) return true;
+  if (!positionVocab) return false;
+
+  for (const pos of positionVocab) {
+    if (
+      endpoint.startsWith(`${pos}-`) &&
+      isAnatomy(endpoint.slice(pos.length + 1))
+    ) {
+      return true;
+    }
+    const suffix = `-${pos}`;
+    if (
+      endpoint.endsWith(suffix) &&
+      isAnatomy(endpoint.slice(0, -suffix.length))
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * If `endpoint` is exactly a registered icon's expanded legacy form (e.g.
+ * "alert-icon" for icon id "alert"), return that icon id. Bare "icon" is
+ * already a valid SPEC-047 anatomy endpoint (anatomy-terms.json), so an
+ * icon-family compound resolves to the anatomy endpoint "icon" plus a
+ * separate `icon` field — not a literal endpoint string of its own.
+ *
+ * @param {string} endpoint
+ * @param {object} registry
+ * @returns {string|null}
+ */
+function iconEndpointMatch(endpoint, registry) {
+  for (const iconId of registry.byField.icon ?? []) {
+    if (registry.tokenNameMap[iconId] === endpoint) return iconId;
+  }
+  return null;
+}
+
+/**
+ * Decompose a token name into a 13-field name object.
+ *
+ * @param {string} tokenName - kebab-case token name
+ * @param {object} tokenData - the token's JSON data (for metadata like `component`)
+ * @param {object} registry - { byField, terms } from loadRegistries
+ * @param {string} sourceFile - which source file this token came from
+ * @returns {object} decomposition result
+ */
+export function decompose(tokenName, tokenData, registry, sourceFile) {
+  const segments = tokenName.split("-");
+  const nameObject = {};
+  const matched = new Array(segments.length).fill(false);
+  const matchDetails = new Array(segments.length).fill(null);
+  const warnings = [];
+  const gaps = [];
+
+  // Phase 1: Use metadata-provided component if available
+  if (tokenData.component) {
+    const compSegments = tokenData.component.split("-");
+    const compLen = compSegments.length;
+    // Verify the component appears in the token name
+    const compIndex = findSubsequence(segments, compSegments);
+    if (compIndex !== -1) {
+      nameObject.component = tokenData.component;
+      for (let i = compIndex; i < compIndex + compLen; i++) {
+        matched[i] = true;
+        matchDetails[i] = "component";
+      }
+    } else {
+      // Component is in metadata but not in name — record this
+      nameObject.component = tokenData.component;
+      warnings.push(
+        `component "${tokenData.component}" in metadata but not found in name segments`,
+      );
+    }
+  }
+
+  // Phase 1b: Use metadata-provided icon if available. Mirrors the component
+  // handling above — needed because an icon's expanded legacy form (e.g.
+  // "link-out" -> "link-out-icon") can be the same length as an unrelated
+  // anatomy term (anatomy-terms.json also declares "link-out-icon"), so
+  // Phase 3's length-then-priority tie-break would otherwise pick anatomy
+  // (icon isn't in fieldPriority) over the correct icon field.
+  if (tokenData.icon) {
+    const icExpanded = registry.tokenNameMap[tokenData.icon] || tokenData.icon;
+    const icSegments = icExpanded.split("-");
+    const icIndex = findSubsequence(segments, icSegments);
+    if (icIndex !== -1) {
+      nameObject.icon = tokenData.icon;
+      for (let i = icIndex; i < icIndex + icSegments.length; i++) {
+        matched[i] = true;
+        matchDetails[i] = "icon";
+      }
+    } else {
+      // Don't set nameObject.icon here: the icon wasn't actually part of
+      // this key's segments (e.g. semantic-ramp icon color tokens, where
+      // `icon` is domain context, not a name-object field). Setting it
+      // anyway used to leak into Phase 9's re-serialize, which spuriously
+      // routes through serialize()'s icon/owner branch and re-adds an
+      // "icon-" prefix the authored key never had (dsi.14).
+      warnings.push(
+        `icon "${tokenData.icon}" in metadata but not found in name segments`,
+      );
+    }
+  }
+
+  // Phase 2: Try matching compound properties (longest first)
+  const sortedCompound = [...COMPOUND_PROPERTIES].sort(
+    (a, b) => b.split("-").length - a.split("-").length,
+  );
+  for (const compound of sortedCompound) {
+    if (nameObject.property) break;
+    const compSegs = compound.split("-");
+    const idx = findSubsequenceUnmatched(segments, compSegs, matched);
+    if (idx !== -1) {
+      nameObject.property = compound;
+      for (let i = idx; i < idx + compSegs.length; i++) {
+        matched[i] = true;
+        matchDetails[i] = "property";
+      }
+    }
+  }
+
+  // Phase 2.5: Detect space-between (-to-) gap endpoints.
+  //
+  // Mirrors sdk/core/src/naming.rs's space-between branch and validates each
+  // endpoint the same way SPEC-047 does (spec047.rs `endpoint_resolves`): a
+  // position, a generic anatomy term, a component-declared anatomy part, or one
+  // of those glued to a registered position via a hyphen-bounded prefix/suffix.
+  // Endpoints are stored as their full compound string — not split further.
+  {
+    let componentEndIdx = 0;
+    for (let i = 0; i < segments.length; i++) {
+      if (matchDetails[i] === "component") componentEndIdx = i + 1;
+    }
+
+    let connectorIdx = -1;
+    for (let i = componentEndIdx; i < segments.length; i++) {
+      if (segments[i] === "to" && !matched[i]) {
+        connectorIdx = i;
+        break;
+      }
+    }
+
+    if (connectorIdx > componentEndIdx) {
+      const beforeConnector = segments.slice(componentEndIdx, connectorIdx);
+
+      const positionVocab = registry.byField.position;
+      const anatomyVocab = registry.byField.anatomy;
+      const declaredParts =
+        registry.componentAnatomy?.get(nameObject.component) || new Set();
+
+      // Shrink the "from" window from the left: a leading variant/structure/
+      // etc. segment may precede the gap connective (see naming.rs's
+      // `{variant?}-{component?}-{structure?}-...-{property}` shape), so try
+      // the longest unmatched *suffix* of beforeConnector first.
+      let fromStart = -1;
+      let fromCandidate = null;
+      let fromIcon = null;
+      for (let k = beforeConnector.length; k >= 1; k--) {
+        const startOffset = beforeConnector.length - k;
+        const absoluteStart = componentEndIdx + startOffset;
+        const clean = beforeConnector
+          .slice(startOffset)
+          .every((_, j) => !matched[absoluteStart + j]);
+        if (!clean) continue;
+        const candidate = beforeConnector.slice(startOffset).join("-");
+        const iconId = iconEndpointMatch(candidate, registry);
+        if (iconId) {
+          fromStart = absoluteStart;
+          fromCandidate = "icon";
+          fromIcon = iconId;
+          break;
+        }
+        if (
+          endpointResolves(
+            candidate,
+            positionVocab,
+            anatomyVocab,
+            declaredParts,
+          )
+        ) {
+          fromStart = absoluteStart;
+          fromCandidate = candidate;
+          break;
+        }
+      }
+
+      if (fromCandidate) {
+        const rest = segments.slice(connectorIdx + 1);
+        let toSegs = null;
+        let toIcon = null;
+        for (let k = rest.length; k >= 1; k--) {
+          if (matched[connectorIdx + 1 + k - 1]) continue;
+          const candidate = rest.slice(0, k).join("-");
+          const iconId = iconEndpointMatch(candidate, registry);
+          if (iconId) {
+            toSegs = rest.slice(0, k);
+            toIcon = iconId;
+            break;
+          }
+          if (
+            endpointResolves(
+              candidate,
+              positionVocab,
+              anatomyVocab,
+              declaredParts,
+            )
+          ) {
+            toSegs = rest.slice(0, k);
+            break;
+          }
+        }
+
+        // A single nameObject.icon field can't hold two distinct glyphs; bail
+        // out rather than silently keeping only the `from` side's icon.
+        if (toSegs && fromIcon && toIcon && fromIcon !== toIcon) {
+          toSegs = null;
+        }
+
+        if (toSegs) {
+          nameObject.property = "space-between";
+          nameObject.from = fromCandidate;
+          nameObject.to = toIcon ? "icon" : toSegs.join("-");
+          if (fromIcon || toIcon) nameObject.icon = fromIcon || toIcon;
+          for (let i = fromStart; i < connectorIdx; i++) {
+            matched[i] = true;
+            matchDetails[i] = "from";
+          }
+          matched[connectorIdx] = true;
+          matchDetails[connectorIdx] = "spacing-between-connector";
+          for (let i = 0; i < toSegs.length; i++) {
+            matched[connectorIdx + 1 + i] = true;
+            matchDetails[connectorIdx + 1 + i] = "to";
+          }
+        }
+      }
+    }
+  }
+
+  // Phase 2.6: Compound emphasis — hyphen-join a run of adjacent unmatched
+  // segments that each independently match an `emphasis` registry term (e.g.
+  // "heavy"+"strong" -> "heavy-strong"), mirroring the compound-state pattern
+  // (Proposal 001 / 005). Without this, only the first term in the run would
+  // be captured and any adjacent ones lost as unmatched segments. Only the
+  // leftmost run is combined — real typography tokens carry at most one.
+  {
+    const emphasisTerms = [...registry.terms]
+      .filter((t) => t.field === "emphasis")
+      .sort((a, b) => b.segments.length - a.segments.length);
+
+    const matchEmphasisAt = (idx) => {
+      for (const term of emphasisTerms) {
+        if (matched[idx] || term.segments.length > segments.length - idx)
+          continue;
+        let ok = true;
+        for (let j = 0; j < term.segments.length; j++) {
+          if (matched[idx + j] || segments[idx + j] !== term.segments[j]) {
+            ok = false;
+            break;
+          }
+        }
+        if (ok) return term;
+      }
+      return null;
+    };
+
+    for (let i = 0; i < segments.length && !nameObject.emphasis; i++) {
+      const first = matchEmphasisAt(i);
+      if (!first) continue;
+      const ids = [first.id];
+      let cursor = i + first.segments.length;
+      for (
+        let next = matchEmphasisAt(cursor);
+        next;
+        next = matchEmphasisAt(cursor)
+      ) {
+        ids.push(next.id);
+        cursor += next.segments.length;
+      }
+      nameObject.emphasis = ids.join("-");
+      for (let k = i; k < cursor; k++) {
+        matched[k] = true;
+        matchDetails[k] = "emphasis";
+      }
+    }
+  }
+
+  // Phase 3: Match registry terms + extra terms against unmatched segments
+  const fieldPriority = [
+    "component",
+    "variant",
+    "object",
+    "anatomy",
+    "structure",
+    "substructure",
+    "state",
+    "size",
+    "density",
+    "shape",
+    "orientation",
+    "position",
+    "property",
+  ];
+
+  // Combine registry terms with extra terms for matching
+  const allTerms = {
+    byField: registry.byField,
+    terms: [...registry.terms, ...EXTRA_TERMS],
+  };
+  // Re-sort by segment count descending
+  allTerms.terms.sort((a, b) => b.segments.length - a.segments.length);
+
+  // Build a list of all possible matches at every unmatched position
+  const positionMatches = [];
+  for (let i = 0; i < segments.length; i++) {
+    if (matched[i]) continue;
+    const matches = findRegistryMatches(segments, i, allTerms, matched);
+    for (const m of matches) {
+      positionMatches.push({ ...m, startIndex: i });
+    }
+  }
+
+  // Sort by: longer matches first, then by field priority.
+  // Fields not in fieldPriority (e.g. colorFamily, colorRole) get Infinity
+  // so they sort AFTER all listed fields, not before them (indexOf returns -1 otherwise).
+  //
+  // Exception: once `property` has already resolved to a typography compound
+  // (font-weight/font-style, set by Phase 2 before this runs), weight/style
+  // matches outrank everything else. Otherwise a spelling that also exists in
+  // another registry loses by default (weight/style aren't in fieldPriority):
+  // "black" is also a variant/color name, "medium" is also a size alias (id "m").
+  const typographyProperty =
+    nameObject.property === "font-weight" ||
+    nameObject.property === "font-style";
+  const priority = (f) => {
+    if (typographyProperty && (f === "weight" || f === "style")) return -1;
+    const i = fieldPriority.indexOf(f);
+    return i === -1 ? Infinity : i;
+  };
+  positionMatches.sort((a, b) => {
+    if (b.length !== a.length) return b.length - a.length;
+    return priority(a.field) - priority(b.field);
+  });
+
+  // Greedily assign matches, skipping conflicts
+  for (const match of positionMatches) {
+    const { field, id, length, startIndex } = match;
+
+    // Skip if field already assigned (except component from metadata)
+    if (nameObject[field] !== undefined && field !== "component") continue;
+    if (field === "component" && nameObject.component) continue;
+
+    // Skip if any segment in this range is already matched
+    let conflict = false;
+    for (let i = startIndex; i < startIndex + length; i++) {
+      if (matched[i]) {
+        conflict = true;
+        break;
+      }
+    }
+    if (conflict) continue;
+
+    // Proposal 006: `state` is an ordered array of atomic ids, not a single
+    // string like every other catalog field. Legacy strings never encode a
+    // true multi-part compound (see naming.rs), so this is always one element.
+    nameObject[field] = field === "state" ? [id] : id;
+    for (let i = startIndex; i < startIndex + length; i++) {
+      matched[i] = true;
+      matchDetails[i] = field;
+    }
+  }
+
+  // Phase 4: Handle numeric scale values
+  for (let i = 0; i < segments.length; i++) {
+    if (matched[i]) continue;
+    if (NUMERIC_SCALE_PATTERN.test(segments[i])) {
+      // Number, not string: matches the existing convention (e.g. color-palette's
+      // scaleIndex:100) and is required by naming.rs's `.as_i64()` mirror — a
+      // string here silently fails that cast, dropping the segment from any
+      // legacy key rebuilt from this object (dsi.6 caught this via alias `$ref`
+      // denormalization, which isn't covered by the primary-name roundtrip check).
+      nameObject.scaleIndex = Number(segments[i]);
+      matched[i] = true;
+      matchDetails[i] = "scaleIndex";
+      if (!registry.allFields?.has("scaleIndex")) {
+        gaps.push({
+          type: "numeric-scale-index",
+          value: segments[i],
+          description:
+            "Numeric scale index has no field in the 13-field taxonomy",
+        });
+      }
+    }
+  }
+
+  // Phase 4.5: Color-domain promotion
+  // colorFamily/colorRole have Infinity priority so they don't steal segments
+  // from object, size, etc. in non-color tokens. But when context confirms a
+  // color domain, matched variant/object fields are promoted to the color taxonomy.
+  //
+  //   Palette ramp (scaleIndex + no component):
+  //     variant:"blue" → colorFamily:"blue"
+  //   Semantic ramp (scaleIndex + no component + property:"color"):
+  //     variant:"accent" → colorRole:"accent"  (dsi.6: accent/informative/negative/
+  //     notice/positive-color-N; unlike the hue ramp, `property` stays "color"
+  //     since serialize() spells it out explicitly for this branch)
+  //   Component color (property:"color" + component):
+  //     variant:<hue>  → colorFamily:<hue>, then object:<role> → colorRole:<role>
+  //     variant:<role> → colorRole:<role>  (no-hue tokens, e.g. color-primary)
+  {
+    const hueSet = registry.byField["colorFamily"] || new Set();
+    const roleSet = registry.byField["colorRole"] || new Set();
+
+    // Palette ramp: scaleIndex assigned, no component
+    if (
+      nameObject.scaleIndex !== undefined &&
+      nameObject.component === undefined &&
+      nameObject.variant !== undefined &&
+      hueSet.has(nameObject.variant)
+    ) {
+      nameObject.colorFamily = nameObject.variant;
+      delete nameObject.variant;
+    }
+
+    // Semantic ramp: no component, no object, property "color". Unlike the hue
+    // ramp, scaleIndex isn't required — naming.rs's semantic-ramp branch
+    // supports the bare "informative-color" shape too (no trailing scaleIndex).
+    // object===undefined excludes the component-color-with-object shape (e.g.
+    // "accent-edge-color-default"), which keeps variant as-is.
+    if (
+      nameObject.component === undefined &&
+      nameObject.object === undefined &&
+      nameObject.property === "color" &&
+      nameObject.variant !== undefined &&
+      roleSet.has(nameObject.variant)
+    ) {
+      nameObject.colorRole = nameObject.variant;
+      delete nameObject.variant;
+    }
+
+    // Component color: property === "color" + component present
+    if (nameObject.property === "color" && nameObject.component !== undefined) {
+      if (nameObject.variant !== undefined && hueSet.has(nameObject.variant)) {
+        // Hue in variant → promote to colorFamily; also promote object → colorRole alongside it
+        nameObject.colorFamily = nameObject.variant;
+        delete nameObject.variant;
+        if (nameObject.object !== undefined && roleSet.has(nameObject.object)) {
+          nameObject.colorRole = nameObject.object;
+          delete nameObject.object;
+        }
+      } else if (
+        nameObject.variant !== undefined &&
+        roleSet.has(nameObject.variant) &&
+        !hueSet.has(nameObject.variant)
+      ) {
+        // Role in variant (no hue) → promote to colorRole (e.g. icon-color-primary-default)
+        nameObject.colorRole = nameObject.variant;
+        delete nameObject.variant;
+      }
+    }
+  }
+
+  // Phase 5: Check for -to- spacing pattern
+  const toIndex = segments.indexOf("to");
+  if (toIndex > 0 && !matched[toIndex]) {
+    gaps.push({
+      type: "spacing-between",
+      value: tokenName,
+      description:
+        "Spacing-between (-to-) pattern has no representation in the 13-field spec",
+    });
+    matched[toIndex] = true;
+    matchDetails[toIndex] = "spacing-between-connector";
+  }
+
+  // Phase 6: Classify known gap terms
+  for (let i = 0; i < segments.length; i++) {
+    if (matched[i]) continue;
+    for (const [gapType, terms] of Object.entries(KNOWN_GAP_TERMS)) {
+      if (terms.includes(segments[i])) {
+        matched[i] = true;
+        matchDetails[i] = `gap:${gapType}`;
+        gaps.push({
+          type: gapType,
+          value: segments[i],
+          description: `"${segments[i]}" is a known ${gapType} term with no field in the taxonomy`,
+        });
+        break;
+      }
+    }
+  }
+
+  // Phase 7: Assign remaining unmatched segments as property (if no property yet)
+  const unmatchedSegments = [];
+  for (let i = 0; i < segments.length; i++) {
+    if (!matched[i]) {
+      unmatchedSegments.push({ index: i, value: segments[i] });
+    }
+  }
+
+  if (unmatchedSegments.length > 0 && !nameObject.property) {
+    // Join consecutive unmatched segments as property
+    const propertyParts = [];
+    for (const { index, value } of unmatchedSegments) {
+      propertyParts.push(value);
+      matched[index] = true;
+      matchDetails[index] = "property";
+    }
+    nameObject.property = propertyParts.join("-");
+  }
+
+  // Phase 8: Flag remaining unmatched segments
+  const finalUnmatched = [];
+  for (let i = 0; i < segments.length; i++) {
+    if (!matched[i]) {
+      finalUnmatched.push({ index: i, segment: segments[i] });
+    }
+  }
+
+  // Record unmatched segments as gaps
+  for (const { segment } of finalUnmatched) {
+    gaps.push({
+      type: "unmatched-segment",
+      value: segment,
+      description: `Segment "${segment}" could not be assigned to any field`,
+    });
+  }
+
+  // Phase 9: Roundtrip check
+  const serialized = serialize(
+    nameObject,
+    registry.tokenNameMap,
+    registry.serializationOrder,
+  );
+  const roundtrips = serialized === tokenName;
+  if (!roundtrips) {
+    warnings.push(`Roundtrip mismatch: "${serialized}" !== "${tokenName}"`);
+  }
+
+  // Phase 10: Score
+  const unmatchedCount = finalUnmatched.length;
+  let confidence;
+  if (unmatchedCount === 0 && roundtrips) {
+    confidence = "HIGH";
+  } else if (unmatchedCount === 0) {
+    confidence = "MEDIUM";
+  } else if (unmatchedCount <= 2) {
+    confidence = "MEDIUM";
+  } else if (unmatchedCount <= 4) {
+    confidence = "LOW";
+  } else {
+    confidence = "FAIL";
+  }
+
+  // Thin cascade format: `property` already spells out `{component}-...`
+  // (the full legacy key stored verbatim, `component` a duplicated
+  // annotation). Mirrors sdk/core/src/naming.rs's `is_thin` check — a thin
+  // token's `property` IS the authored legacy string, so the roundtrip
+  // check below is measuring the analyzer's own re-decomposition, not a
+  // product defect. Keep in sync with the `is_thin` branch in serialize().
+  const thin = Boolean(
+    nameObject.component &&
+    nameObject.property &&
+    nameObject.property.startsWith(`${nameObject.component}-`),
+  );
+
+  return {
+    tokenName,
+    sourceFile,
+    nameObject,
+    confidence,
+    roundtrips,
+    serialized,
+    warnings,
+    gaps,
+    unmatchedSegments: finalUnmatched,
+    matchDetails: segments.map((seg, i) => ({
+      segment: seg,
+      field: matchDetails[i],
+    })),
+    deprecated: !!tokenData.deprecated,
+    private: !!tokenData.private,
+    // `pinned`: token carries an explicit name.legacyKey (source of truth
+    // wins over decomposition — see extract_legacy_key in naming.rs).
+    pinned: !!tokenData.pinned,
+    thin,
+  };
+}
+
+/**
+ * Serialize a name object to kebab-case using the declared field order.
+ * Uses tokenNameMap to output long-form aliases (e.g., xl → extra-large)
+ * for legacy compatibility.
+ *
+ * Color-domain tokens use explicit ordering that mirrors the Rust naming.rs
+ * color-domain branch, bypassing the position-ordered general walk (which
+ * would mis-order state@12 before colorFamily@17):
+ *   palette ramp (no component): {variant?}-{colorFamily}-{scaleIndex?}
+ *   component color (component + colorFamily/colorRole):
+ *     {component}-{property}-{colorFamily?}-{colorRole?}-{state?}
+ *
+ * @param {object} nameObject
+ * @param {object} tokenNameMap - id → tokenName for legacy alias expansion
+ * @param {string[]} [serializationOrder] - ordered field names from field catalog
+ */
+export function serialize(
+  nameObject,
+  tokenNameMap = {},
+  serializationOrder = FALLBACK_SERIALIZATION_ORDER,
+) {
+  const { colorFamily, colorRole, component } = nameObject;
+
+  // Palette ramp: colorFamily present, no component → {variant?}-{colorFamily}-{scaleIndex?}
+  // Guarded on !colorRole too: a hue (color-families.json) and a role
+  // (color-roles.json) are disjoint registries today, so a name object never
+  // carries both — but if that ever changed, falling through to the more
+  // specific semantic-ramp branch below is safer than silently dropping colorRole.
+  if (colorFamily && !component && !colorRole) {
+    const parts = [];
+    if (nameObject.variant)
+      parts.push(tokenNameMap[nameObject.variant] || nameObject.variant);
+    parts.push(tokenNameMap[colorFamily] || colorFamily);
+    if (nameObject.scaleIndex != null)
+      parts.push(String(nameObject.scaleIndex));
+    return parts.join("-");
+  }
+
+  // Semantic ramp: colorRole present, no component, property === "color" →
+  // {colorRole}-color-{scaleIndex?}. dsi.6: accent/informative/negative/notice/
+  // positive-color-N. Unlike the hue ramp above, "color" is NOT implicit here —
+  // these role names collide with plain words elsewhere, so the legacy key
+  // spells it out (e.g. "accent-color-100", not "accent-100").
+  if (colorRole && !component && nameObject.property === "color") {
+    const parts = [tokenNameMap[colorRole] || colorRole, "color"];
+    if (nameObject.scaleIndex != null)
+      parts.push(String(nameObject.scaleIndex));
+    return parts.join("-");
+  }
+
+  // Component color: component + (colorFamily and/or colorRole) AND property === "color".
+  // The property guard prevents this branch from firing when colorRole terms (e.g. "background",
+  // "primary") match a non-color token via the decomposer, which would drop other fields.
+  // → {component}-{property}-{colorFamily?}-{colorRole?}-{state?}
+  if (
+    component &&
+    (colorFamily || colorRole) &&
+    nameObject.property === "color"
+  ) {
+    const parts = [component, nameObject.property];
+    if (colorFamily) parts.push(tokenNameMap[colorFamily] || colorFamily);
+    if (colorRole) parts.push(tokenNameMap[colorRole] || colorRole);
+    // Proposal 006: `state` is an ordered array of atomic ids.
+    if (nameObject.state) {
+      for (const s of nameObject.state) parts.push(tokenNameMap[s] || s);
+    }
+    return parts.join("-");
+  }
+
+  // Thin-format detection: `property` already begins `{component}-`, meaning
+  // the full legacy key is stored verbatim in `property` and `component` is
+  // duplicated metadata annotation only. Emitting component then property here
+  // would double the prefix (e.g. "heading-heading-cjk-font-style"). Mirrors
+  // sdk/core/src/naming.rs's `is_thin` branch — keep in sync.
+  if (
+    component &&
+    nameObject.property &&
+    nameObject.property.startsWith(`${component}-`)
+  ) {
+    return nameObject.property;
+  }
+
+  // Space-between (gap) domain: property literal term "space-between", real
+  // endpoints live in paired `from`/`to` fields (both excludeFromLegacyKey, so
+  // they're skipped below rather than serialized literally). Reconstruct the
+  // legacy connective form `{from}-to-{to}` in property's slot. Mirrors
+  // sdk/core/src/naming.rs's `property == "space-between"` branch — keep in sync.
+  if (
+    nameObject.property === "space-between" &&
+    nameObject.from &&
+    nameObject.to
+  ) {
+    // An "icon" endpoint (bare anatomy term) paired with nameObject.icon is an
+    // icon-family compound (e.g. to:"icon", icon:"alert" -> "alert-icon") —
+    // expand via the icon's tokenName rather than the literal "icon".
+    const parts = [];
+    for (const field of serializationOrder) {
+      if (field === "from" || field === "to" || field === "icon") continue;
+      if (field === "property") {
+        const fromExpanded =
+          nameObject.from === "icon" && nameObject.icon
+            ? tokenNameMap[nameObject.icon] || nameObject.icon
+            : tokenNameMap[nameObject.from] || nameObject.from;
+        const toExpanded =
+          nameObject.to === "icon" && nameObject.icon
+            ? tokenNameMap[nameObject.icon] || nameObject.icon
+            : tokenNameMap[nameObject.to] || nameObject.to;
+        parts.push(`${fromExpanded}-to-${toExpanded}`);
+        continue;
+      }
+      // Proposal 006: `state` is an ordered array of atomic ids, not a single
+      // string like every other catalog field.
+      if (field === "state") {
+        if (nameObject.state) {
+          for (const s of nameObject.state) parts.push(tokenNameMap[s] || s);
+        }
+        continue;
+      }
+      if (nameObject[field]) {
+        parts.push(tokenNameMap[nameObject[field]] || nameObject[field]);
+      }
+    }
+    // != null, not truthy: scaleIndex: 0 is a legitimate value.
+    if (nameObject.scaleIndex != null) parts.push(nameObject.scaleIndex);
+    return parts.join("-");
+  }
+
+  // Icon (non-color) domain: an icon-family token without colorFamily/colorRole
+  // (the ramp branches above didn't apply). `icon`'s catalog position sorts
+  // last, but the legacy key spells it first (e.g. "add-icon-size-100"), so
+  // the position-walk below can't express this — needs an explicit branch.
+  // Mirrors sdk/core/src/naming.rs's non-color icon branch — keep in sync.
+  if (nameObject.icon && !colorFamily && !colorRole && nameObject.property) {
+    const icExpanded = tokenNameMap[nameObject.icon] || nameObject.icon;
+    // Thin-format passthrough: property already spells "{icon}-...".
+    if (nameObject.property.startsWith(`${icExpanded}-`)) {
+      return nameObject.property;
+    }
+    const parts = [icExpanded, nameObject.property];
+    if (nameObject.scaleIndex != null)
+      parts.push(String(nameObject.scaleIndex));
+    // Proposal 006: `state` is an ordered array of atomic ids.
+    if (nameObject.state) {
+      for (const s of nameObject.state) parts.push(tokenNameMap[s] || s);
+    }
+    return parts.join("-");
+  }
+
+  // General path (non-color tokens)
+  const parts = [];
+  for (const field of serializationOrder) {
+    // Proposal 006: `state` is an ordered array of atomic ids, not a single
+    // string like every other catalog field.
+    if (field === "state") {
+      if (nameObject.state) {
+        for (const s of nameObject.state) parts.push(tokenNameMap[s] || s);
+      }
+      continue;
+    }
+    if (nameObject[field]) {
+      const value = nameObject[field];
+      // Use tokenName long form if available (e.g., xl → extra-large)
+      parts.push(tokenNameMap[value] || value);
+    }
+  }
+  // Append scaleIndex at end if present (non-standard: excludeFromLegacyKey
+  // means the loop above never emits it). != null, not truthy: scaleIndex: 0
+  // is a legitimate value. Correctness here relies on the convention that
+  // any token whose `property` is still a fused string (e.g. "font-size-100")
+  // alongside a populated scaleIndex pins an explicit legacyKey instead of
+  // relying on this reconstruction — nothing here structurally prevents a
+  // double-emit if that convention were ever violated.
+  if (nameObject.scaleIndex != null) {
+    parts.push(nameObject.scaleIndex);
+  }
+  return parts.join("-");
+}
+
+/**
+ * Find the first occurrence of subsequence in segments.
+ */
+function findSubsequence(segments, subsequence) {
+  outer: for (let i = 0; i <= segments.length - subsequence.length; i++) {
+    for (let j = 0; j < subsequence.length; j++) {
+      if (segments[i + j] !== subsequence[j]) continue outer;
+    }
+    return i;
+  }
+  return -1;
+}
+
+/**
+ * Find the first occurrence of subsequence in unmatched segments.
+ */
+function findSubsequenceUnmatched(segments, subsequence, matched) {
+  outer: for (let i = 0; i <= segments.length - subsequence.length; i++) {
+    for (let j = 0; j < subsequence.length; j++) {
+      if (matched[i + j] || segments[i + j] !== subsequence[j]) continue outer;
+    }
+    return i;
+  }
+  return -1;
+}
+
+/**
+ * Find all registry matches starting at a given index, respecting already-matched segments.
+ */
+function findRegistryMatches(segments, startIndex, registry, matched) {
+  const results = [];
+  const remaining = segments.length - startIndex;
+
+  for (const term of registry.terms) {
+    if (term.segments.length > remaining) continue;
+
+    let isMatch = true;
+    for (let i = 0; i < term.segments.length; i++) {
+      if (
+        matched[startIndex + i] ||
+        segments[startIndex + i] !== term.segments[i]
+      ) {
+        isMatch = false;
+        break;
+      }
+    }
+
+    if (isMatch) {
+      results.push({
+        field: term.field,
+        id: term.id,
+        length: term.segments.length,
+      });
+    }
+  }
+
+  return results;
+}

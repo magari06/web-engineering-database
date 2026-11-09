@@ -1,0 +1,12 @@
+{
+  "id": "focusable-content",
+  "evaluate": "focusable-content-evaluate",
+  "metadata": {
+    "impact": "serious",
+    "messages": {
+      "pass": "Element contains focusable elements",
+      "incomplete": "Check that elements with a negative tabindex can receive keyboard focus so the region can be scrolled",
+      "fail": "Element should have focusable content"
+    }
+  }
+}

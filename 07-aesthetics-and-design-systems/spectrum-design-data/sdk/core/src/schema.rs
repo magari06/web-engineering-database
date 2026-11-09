@@ -1,0 +1,435 @@
+// Copyright 2026 Adobe. All rights reserved.
+// This file is licensed to you under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License. You may obtain a copy
+// of the License at http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under
+// the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+// OF ANY KIND, either express or implied. See the License for the specific language
+// governing permissions and limitations under the License.
+
+//! Load legacy Spectrum token JSON Schemas (`packages/design-data-spec/schemas`) into a [`SchemaRegistry`].
+
+use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
+
+use jsonschema::{Draft, Registry, Resource, ValidationOptions, Validator};
+use serde_json::Value;
+
+use crate::CoreError;
+
+/// Compiled validators for legacy token types plus `token-file.json`.
+pub struct SchemaRegistry {
+    by_url: HashMap<String, Arc<Validator>>,
+    token_file_validator: Arc<Validator>,
+    token_file_schema_url: String,
+}
+
+impl SchemaRegistry {
+    /// Load `schemas/token-types/*.json` and `schemas/token-file.json` from `schemas_dir`.
+    pub fn load_legacy_token_schemas(schemas_dir: &Path) -> Result<Self, CoreError> {
+        let token_types_dir = schemas_dir.join("token-types");
+        if !token_types_dir.is_dir() {
+            return Err(CoreError::SchemaDirectoryMissing(token_types_dir));
+        }
+
+        let mut pairs: Vec<(String, Resource)> = Vec::new();
+        let mut values_by_url: HashMap<String, Value> = HashMap::new();
+
+        for entry in fs::read_dir(&token_types_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let text = fs::read_to_string(&path)?;
+            let value: Value = serde_json::from_str(&text)?;
+            let id = value
+                .get("$id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| CoreError::MissingSchemaId(path.clone()))?
+                .to_string();
+            let resource = Resource::from_contents(value.clone())?;
+            pairs.push((id.clone(), resource));
+            values_by_url.insert(id, value);
+        }
+
+        let token_file_path = schemas_dir.join("token-file.json");
+        let token_file_text = fs::read_to_string(&token_file_path)?;
+        let token_file_value: Value = serde_json::from_str(&token_file_text)?;
+        let token_file_id = token_file_value
+            .get("$id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| CoreError::MissingSchemaId(token_file_path.clone()))?
+            .to_string();
+        let token_file_resource = Resource::from_contents(token_file_value.clone())?;
+        pairs.push((token_file_id.clone(), token_file_resource));
+
+        let registry = Registry::try_from_resources(pairs)?;
+        let registry = Arc::new(registry);
+
+        let build_opts = || {
+            jsonschema::options()
+                .with_registry((*registry).clone())
+                .with_draft(Draft::Draft202012)
+                .should_validate_formats(true)
+        };
+
+        let mut by_url = HashMap::new();
+        for (url, schema_value) in &values_by_url {
+            let validator = build_opts()
+                .build(schema_value)
+                .map_err(|e| CoreError::SchemaBuild(e.to_string()))?;
+            by_url.insert(url.clone(), Arc::new(validator));
+        }
+
+        let token_file_validator = build_opts()
+            .build(&token_file_value)
+            .map_err(|e| CoreError::SchemaBuild(e.to_string()))?;
+
+        Ok(Self {
+            by_url,
+            token_file_validator: Arc::new(token_file_validator),
+            token_file_schema_url: token_file_id,
+        })
+    }
+
+    /// Validator for a token object's `$schema` URL (legacy token-types).
+    pub fn validator_for_url(&self, schema_url: &str) -> Option<&Arc<Validator>> {
+        self.by_url.get(schema_url)
+    }
+
+    /// Whole-file validator (`token-file.json`).
+    pub fn token_file_validator(&self) -> &Arc<Validator> {
+        &self.token_file_validator
+    }
+
+    pub fn token_file_schema_url(&self) -> &str {
+        &self.token_file_schema_url
+    }
+
+    /// Validate a platform manifest document against `manifest.schema.json`.
+    ///
+    /// `manifest_schema_path` points at the spec's `schemas/manifest.schema.json`.
+    /// Returns the list of Layer 1 schema violation messages (empty = valid).
+    /// This is the manifest analog of token schema validation and is used by the
+    /// Foundation→Platform cascade ([`crate::graph::TokenGraph::apply_platform_manifest`]).
+    pub fn validate_manifest(
+        manifest: &Value,
+        manifest_schema_path: &Path,
+    ) -> Result<Vec<String>, CoreError> {
+        let validator = build_schema_validator(
+            manifest_schema_path,
+            jsonschema::options().with_draft(Draft::Draft202012),
+        )?;
+        Ok(validator
+            .iter_errors(manifest)
+            .map(|e| e.to_string())
+            .collect())
+    }
+
+    /// Validate an arbitrary JSON document against a schema file on disk.
+    ///
+    /// The JSON Schema draft is auto-detected from the schema's `$schema`
+    /// keyword, so this works for both Draft 2020-12 design-data schemas
+    /// (`field.schema.json`, `component.schema.json`, `mode-set.schema.json`) and
+    /// the Draft-07 `registry-value.json`. Sibling `*.json` schemas in the same
+    /// directory (and its `value-types/` subdirectory) are registered by their
+    /// `$id` so cross-schema `$ref`s (e.g. `component.schema.json` →
+    /// `accessibility.schema.json`) resolve locally instead of being fetched over
+    /// the network. Returns the list of Layer 1 schema violation messages
+    /// (empty = valid). Used by the `validate-dataset` command to schema-check
+    /// the registered catalog directories.
+    pub fn validate_value_against_schema_file(
+        value: &Value,
+        schema_path: &Path,
+    ) -> Result<Vec<String>, CoreError> {
+        let validator = cached_validator(schema_path)?;
+        Ok(validator
+            .iter_errors(value)
+            .map(|e| e.to_string())
+            .collect())
+    }
+
+    /// Construct a no-op stub for unit tests where schema validation is never reached.
+    #[cfg(test)]
+    pub fn new_stub() -> Self {
+        use jsonschema::validator_for;
+        let empty_schema = serde_json::json!({
+            "$schema": "https://json-schema.org/draft/2020-12/schema"
+        });
+        let validator = Arc::new(validator_for(&empty_schema).expect("stub schema is valid"));
+        Self {
+            by_url: HashMap::new(),
+            token_file_validator: validator,
+            token_file_schema_url: String::new(),
+        }
+    }
+}
+
+/// Process-wide cache of compiled [`Validator`]s for
+/// [`SchemaRegistry::validate_value_against_schema_file`], keyed by canonicalized
+/// schema path. That function is called once per fragment/entry (e.g. every
+/// `extensions/` fragment item during a manifest load) with a fixed set of
+/// [`ValidationOptions`], so a schema file's compiled validator — including the
+/// disk reads + `$ref` resolution `build_schema_validator` performs for every
+/// sibling schema — only needs to happen once per process, not once per call.
+fn schema_validator_cache() -> &'static Mutex<HashMap<PathBuf, Arc<Validator>>> {
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, Arc<Validator>>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Compile (or fetch from [`schema_validator_cache`]) the validator for
+/// `schema_path`, always with `should_validate_formats(true)` and draft
+/// auto-detection — the fixed options `validate_value_against_schema_file` uses.
+fn cached_validator(schema_path: &Path) -> Result<Arc<Validator>, CoreError> {
+    let key = schema_path
+        .canonicalize()
+        .unwrap_or_else(|_| schema_path.to_path_buf());
+
+    if let Some(validator) = schema_validator_cache()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(&key)
+    {
+        return Ok(Arc::clone(validator));
+    }
+
+    let validator = Arc::new(build_schema_validator(
+        schema_path,
+        jsonschema::options().should_validate_formats(true),
+    )?);
+    schema_validator_cache()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(key, Arc::clone(&validator));
+    Ok(validator)
+}
+
+/// Read `schema_path`, register sibling `*.json` schemas in its directory (and a
+/// `value-types/` subdirectory, if present) by their `$id` so cross-schema `$ref`s
+/// resolve offline, then compile a [`Validator`] with `options` (draft, format
+/// validation, etc. are the caller's choice — this only wires up the registry).
+fn build_schema_validator(
+    schema_path: &Path,
+    options: ValidationOptions,
+) -> Result<Validator, CoreError> {
+    let text = fs::read_to_string(schema_path)?;
+    let schema: Value = serde_json::from_str(&text)?;
+
+    let mut resources: Vec<(String, Resource)> = Vec::new();
+    if let Some(dir) = schema_path.parent() {
+        collect_schema_resources(dir, &mut resources)?;
+        // `token-file.json` (a sibling of these schemas) refs into `token-types/`.
+        for sub in ["value-types", "token-types"] {
+            let sub_dir = dir.join(sub);
+            if sub_dir.is_dir() {
+                collect_schema_resources(&sub_dir, &mut resources)?;
+            }
+        }
+    }
+
+    let mut builder = options;
+    if !resources.is_empty() {
+        let registry = Registry::try_from_resources(resources)?;
+        builder = builder.with_registry(registry);
+    }
+    builder
+        .build(&schema)
+        .map_err(|e| CoreError::SchemaBuild(e.to_string()))
+}
+
+/// Read every `*.json` schema file in `dir`, pairing each by its `$id` with a
+/// [`Resource`] for `$ref` resolution. Files without a string `$id` are skipped.
+fn collect_schema_resources(
+    dir: &Path,
+    out: &mut Vec<(String, Resource)>,
+) -> Result<(), CoreError> {
+    for entry in fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let text = fs::read_to_string(&path)?;
+        let value: Value = match serde_json::from_str(&text) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let Some(id) = value
+            .get("$id")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+        else {
+            continue;
+        };
+        let resource = Resource::from_contents(value)?;
+        out.push((id, resource));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn manifest_schema_path() -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../packages/design-data-spec/schemas/manifest.schema.json")
+    }
+
+    #[test]
+    fn validate_manifest_accepts_valid_document() {
+        let manifest = json!({
+            "specVersion": "1.0.0-draft",
+            "foundationVersion": "1.0.0",
+            "include": ["component=button"],
+            "modeSetRestrictions": {"colorScheme": {"allowed": ["light", "dark"]}}
+        });
+        let errors = SchemaRegistry::validate_manifest(&manifest, &manifest_schema_path()).unwrap();
+        assert!(errors.is_empty(), "expected no errors, got: {errors:?}");
+    }
+
+    #[test]
+    fn validate_manifest_accepts_identity_fields() {
+        // platform / platformVersion / repository (h890.27.1) are optional and
+        // additive — a manifest declaring them still validates cleanly.
+        let manifest = json!({
+            "specVersion": "1.0.0-draft",
+            "foundationVersion": "1.0.0",
+            "platform": "react-spectrum",
+            "platformVersion": "React Spectrum 3.x",
+            "repository": "https://github.com/adobe/react-spectrum"
+        });
+        let errors = SchemaRegistry::validate_manifest(&manifest, &manifest_schema_path()).unwrap();
+        assert!(errors.is_empty(), "expected no errors, got: {errors:?}");
+    }
+
+    #[test]
+    fn validate_manifest_rejects_missing_required_field() {
+        // Missing the required `foundationVersion`.
+        let manifest = json!({ "specVersion": "1.0.0-draft" });
+        let errors = SchemaRegistry::validate_manifest(&manifest, &manifest_schema_path()).unwrap();
+        assert!(!errors.is_empty());
+    }
+
+    #[test]
+    fn validate_manifest_rejects_unknown_top_level_key() {
+        // Schema sets additionalProperties:false at the top level.
+        let manifest = json!({
+            "specVersion": "1.0.0-draft",
+            "foundationVersion": "1.0.0",
+            "bogusKey": true
+        });
+        let errors = SchemaRegistry::validate_manifest(&manifest, &manifest_schema_path()).unwrap();
+        assert!(!errors.is_empty());
+    }
+
+    #[test]
+    fn validate_manifest_rejects_inline_extensions() {
+        // manifest.schema.json (spec/manifest.md#extensions-directory, h890.26.1)
+        // dropped the inline `extensions` property in favor of the sibling
+        // `extensions/` directory — additionalProperties:false now rejects it at
+        // the top level like any other unknown key. Per-fragment schema
+        // validation of what lives *in* that directory is h890.26.3; the loader
+        // that globs it (h890.26.2) reads fragments directly, not through this
+        // manifest-level schema.
+        let manifest = json!({
+            "specVersion": "1.0.0-draft",
+            "foundationVersion": "1.0.0",
+            "extensions": { "tokens": [{"name": {"property": "color"}, "value": "#000"}] }
+        });
+        let errors = SchemaRegistry::validate_manifest(&manifest, &manifest_schema_path()).unwrap();
+        assert!(!errors.is_empty());
+    }
+
+    // build_schema_validator wires the *entire* schemas/ directory (plus value-types/)
+    // into one registry, keyed by $id — so a future schema with a colliding $id would
+    // silently shadow another rather than erroring, breaking validation for whichever
+    // schema loses. This guards that: if it ever fires, narrow build_schema_validator's
+    // resource collection to only the files each caller actually depends on instead of
+    // the whole directory.
+    #[test]
+    fn schemas_directory_has_no_duplicate_ids() {
+        let dir = manifest_schema_path().parent().unwrap().to_path_buf();
+        let mut resources = Vec::new();
+        collect_schema_resources(&dir, &mut resources).unwrap();
+        let value_types = dir.join("value-types");
+        if value_types.is_dir() {
+            collect_schema_resources(&value_types, &mut resources).unwrap();
+        }
+        let mut seen = std::collections::HashSet::new();
+        for (id, _) in &resources {
+            assert!(seen.insert(id.clone()), "duplicate schema $id: {id}");
+        }
+    }
+
+    fn spec_schema(name: &str) -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../packages/design-data-spec/schemas")
+            .join(name)
+    }
+
+    fn component_with_part(part: Value) -> Value {
+        json!({
+            "$id": "https://opensource.adobe.com/spectrum-design-data/schemas/v0/components/demo.json",
+            "name": "demo",
+            "displayName": "Demo",
+            "meta": {"category": "actions", "documentationUrl": "https://example.com/demo"},
+            "anatomy": [part]
+        })
+    }
+
+    #[test]
+    fn anatomy_part_rejects_presence_states_on_a_required_part() {
+        for (part, valid) in [
+            (
+                json!({"name": "focus-indicator", "presentIn": ["focus"]}),
+                true,
+            ),
+            (json!({"name": "label", "required": true}), true),
+            (
+                json!({"name": "focus-indicator", "required": false, "presentIn": ["focus"]}),
+                true,
+            ),
+            (
+                json!({"name": "focus-indicator", "required": true, "presentIn": ["focus"]}),
+                false,
+            ),
+        ] {
+            let standalone = SchemaRegistry::validate_value_against_schema_file(
+                &part,
+                &spec_schema("anatomy-part.schema.json"),
+            )
+            .unwrap();
+            let in_component = SchemaRegistry::validate_value_against_schema_file(
+                &component_with_part(part.clone()),
+                &spec_schema("component.schema.json"),
+            )
+            .unwrap();
+            assert_eq!(
+                standalone.is_empty(),
+                valid,
+                "standalone {part}: {standalone:?}"
+            );
+            assert_eq!(
+                in_component.is_empty(),
+                valid,
+                "component {part}: {in_component:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn anatomy_part_no_longer_accepts_the_old_states_field() {
+        let part = json!({"name": "focus-indicator", "states": ["focus"]});
+        let errors = SchemaRegistry::validate_value_against_schema_file(
+            &part,
+            &spec_schema("anatomy-part.schema.json"),
+        )
+        .unwrap();
+        assert!(!errors.is_empty());
+    }
+}

@@ -1,0 +1,145 @@
+# @adobe/token-names
+
+## 0.2.15
+
+### Patch Changes
+
+- Updated dependencies [[`15f371e`](https://github.com/adobe/spectrum-design-data/commit/15f371e50e2ce95a624a93152e408e1bbe8844dc)]:
+  - @adobe/spectrum-tokens@15.6.0
+
+## 0.2.14
+
+### Patch Changes
+
+- [#1539](https://github.com/adobe/spectrum-design-data/pull/1539) [`da64677`](https://github.com/adobe/spectrum-design-data/commit/da6467789ff0277102c4972703842fc0112e73eb) Thanks [@GarthDB](https://github.com/GarthDB)! - Split the typography name sidecar to match the per-component token files.
+  - **packages/token-names/names/**: move six entries out of `typography.json` into new
+    `body.json`, `code.json`, `detail.json` and `heading.json`, mirroring `tokens/src`.
+
+- Updated dependencies [[`a5fc42f`](https://github.com/adobe/spectrum-design-data/commit/a5fc42ff5dc5b1c0dbc569a733021061e3a57115)]:
+  - @adobe/spectrum-tokens@15.5.1
+
+## 0.2.13
+
+### Patch Changes
+
+- Updated dependencies [[`e693b15`](https://github.com/adobe/spectrum-design-data/commit/e693b15fb1d233b6f70aed2a85532afdf949c8eb)]:
+  - @adobe/spectrum-tokens@15.5.0
+
+## 0.2.12
+
+### Patch Changes
+
+- Updated dependencies [[`d88be4e`](https://github.com/adobe/spectrum-design-data/commit/d88be4e0204abb31d9f02ce680acd0fe478057a7)]:
+  - @adobe/spectrum-tokens@15.4.1
+
+## 0.2.11
+
+### Patch Changes
+
+- Updated dependencies [[`fab8733`](https://github.com/adobe/spectrum-design-data/commit/fab873306f0798c8a2f3d532e6df4eca4e0b7460)]:
+  - @adobe/spectrum-tokens@15.4.0
+
+## 0.2.10
+
+### Patch Changes
+
+- Updated dependencies [[`6005339`](https://github.com/adobe/spectrum-design-data/commit/6005339a0678226eee3e827fd5bbfa793f5bccc7)]:
+  - @adobe/spectrum-tokens@15.3.0
+
+## 0.2.9
+
+### Patch Changes
+
+- Updated dependencies [[`a734594`](https://github.com/adobe/spectrum-design-data/commit/a734594d1592701632f790a58992a904df579ee1)]:
+  - @adobe/spectrum-tokens@15.2.0
+
+## 0.2.8
+
+### Patch Changes
+
+- Updated dependencies [[`9c697cf`](https://github.com/adobe/spectrum-design-data/commit/9c697cfcee3820ddc7bc3688ea000552de708641)]:
+  - @adobe/spectrum-tokens@15.1.0
+
+## 0.2.7
+
+### Patch Changes
+
+- Updated dependencies [[`afbadb2`](https://github.com/adobe/spectrum-design-data/commit/afbadb23a3ddd75640777909cdf97b849fc0daa7)]:
+  - @adobe/spectrum-tokens@15.0.0
+
+## 0.2.6
+
+### Patch Changes
+
+- Updated dependencies [[`b4f79db`](https://github.com/adobe/spectrum-design-data/commit/b4f79db78d8b889b46b98d0fc26d424c1d4fe5fe), [`62e74d7`](https://github.com/adobe/spectrum-design-data/commit/62e74d7f4d59bcc3e63fbc5b7c594f65ef78b024), [`8d8bf09`](https://github.com/adobe/spectrum-design-data/commit/8d8bf0904e716ed86b10f890251980f73f0215c7)]:
+  - @adobe/spectrum-tokens@14.15.0
+
+## 0.2.5
+
+### Patch Changes
+
+- Updated dependencies [[`0297e7e`](https://github.com/adobe/spectrum-design-data/commit/0297e7ee77e102a3756302f83ab9236cd142ee58), [`b57ae32`](https://github.com/adobe/spectrum-design-data/commit/b57ae328a91c68f25bbf51fffecb6c5f3bed3e8f)]:
+  - @adobe/spectrum-tokens@14.14.0
+
+## 0.2.4
+
+### Patch Changes
+
+- Updated dependencies [[`dcf0832`](https://github.com/adobe/spectrum-design-data/commit/dcf083214d56989817db192801638e3ec20e2306)]:
+  - @adobe/spectrum-tokens@14.13.2
+
+## 0.2.3
+
+### Patch Changes
+
+- Updated dependencies [[`eac1cb3`](https://github.com/adobe/spectrum-design-data/commit/eac1cb3121eda40c929e333f1375c75895244882)]:
+  - @adobe/spectrum-tokens@14.13.1
+
+## 0.2.2
+
+### Patch Changes
+
+- Updated dependencies [[`2573230`](https://github.com/adobe/spectrum-design-data/commit/2573230d0ccd39214adae0fde0c4a52e997445ca)]:
+  - @adobe/spectrum-tokens@14.13.0
+
+## 0.2.1
+
+### Patch Changes
+
+- Updated dependencies [[`60a4835`](https://github.com/adobe/spectrum-design-data/commit/60a4835e245965639a4ac89b41d2884dd63a0bbb)]:
+  - @adobe/spectrum-tokens@14.12.0
+
+## 0.2.0
+
+### Minor Changes
+
+- [#977](https://github.com/adobe/spectrum-design-data/pull/977) [`526d2de`](https://github.com/adobe/spectrum-design-data/commit/526d2de363788c1e916a1ed6426e14600d84fd73) Thanks [@GarthDB](https://github.com/GarthDB)! - Classify line-height multiplier and CJK line-height multiplier tokens.
+  - **registry/property-terms.json**: add `line-height-multiplier` term (unitless ratio,
+    distinct from absolute px line-height paired with a font-size tier).
+  - **sdk/validate/rules/mod.rs**: add `multiplier.json` to typography `DOMAIN_SCHEMAS`
+    so the `family` field is permitted on CJK multiplier tokens (SPEC-042).
+  - **sdk/validate/rules/spec043.rs**: extend typography domain-required-fields check to
+    accept `scaleIndex` and `structure` alongside `family`/`weight`/`style`.
+  - **token-names/names/typography.json**: sidecar entries for all 4 tokens.
+  - Reduces SPEC-017 warning count by 4.
+
+- [#977](https://github.com/adobe/spectrum-design-data/pull/977) [`526d2de`](https://github.com/adobe/spectrum-design-data/commit/526d2de363788c1e916a1ed6426e14600d84fd73) Thanks [@GarthDB](https://github.com/GarthDB)! - Classify 5 margin multiplier tokens; add margin property-terms and typography structures.
+  - **registry/property-terms.json**: add `margin`, `margin-top`, `margin-bottom`.
+  - **registry/structures.json**: add `body`, `detail`, `heading` typography-scale structures.
+  - **token-names/names/typography.json**: sidecar entries for all 5 tokens using
+    `{ structure, property }` shape.
+  - Reduces SPEC-017 (`string-name-tech-debt`) warning count by 5.
+
+## 0.1.1
+
+### Patch Changes
+
+- Updated dependencies [[`e9974fb`](https://github.com/adobe/spectrum-design-data/commit/e9974fb7360e849e928b31518b073996b49ecd6b), [`ba06968`](https://github.com/adobe/spectrum-design-data/commit/ba06968226adb268600e0ed1befc9d381e7986b6)]:
+  - @adobe/spectrum-tokens@14.11.0
+
+## 0.1.0
+
+### Minor Changes
+
+- Initial extraction of token taxonomy `name` objects from `@adobe/spectrum-tokens`
+  into this private sidecar package.

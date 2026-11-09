@@ -1,0 +1,124 @@
+import { type Page, test, expect } from '@playwright/test';
+import { getPlayground } from './helpers';
+
+async function runTest(page: Page) {
+	const playground = getPlayground(page);
+
+	await playground.submit.click();
+
+	await expect(playground.error).toHaveText([
+		'Color is required',
+		'Languages is required',
+		'Please accept the terms of service',
+		'At least one option is required',
+	]);
+
+	await playground.reset.click();
+	await expect(playground.error).toHaveText(['', '', '', '']);
+
+	await playground.submit.click();
+
+	await expect(playground.error).toHaveText([
+		'Color is required',
+		'Languages is required',
+		'Please accept the terms of service',
+		'At least one option is required',
+	]);
+
+	await playground.container.getByText('Select a color').click();
+	await playground.container.getByText('blue').click();
+	await expect(playground.error).toHaveText([
+		'',
+		'Languages is required',
+		'Please accept the terms of service',
+		'At least one option is required',
+	]);
+
+	await playground.container.getByText('Select languages').click();
+	await playground.container.getByText('French').click();
+	await playground.container.getByText('Spanish').click();
+	await playground.container.click();
+	await expect(playground.error).toHaveText([
+		'',
+		'',
+		'Please accept the terms of service',
+		'At least one option is required',
+	]);
+
+	await playground.container.getByText('I accept the terms of service').click();
+	await expect(playground.error).toHaveText([
+		'',
+		'',
+		'',
+		'At least one option is required',
+	]);
+
+	await playground.container.getByText('d', { exact: true }).click();
+	await playground.container.getByText('b', { exact: true }).click();
+	await expect(playground.error).toHaveText(['', '', '', '']);
+
+	await playground.submit.click();
+	await expect.poll(playground.result).toStrictEqual({
+		status: 'success',
+		initialValue: {
+			color: 'blue',
+			languages: expect.arrayContaining(['French', 'Spanish']),
+			tos: 'on',
+			options: expect.arrayContaining(['d', 'b']),
+		},
+		fields: expect.arrayContaining(['color', 'languages', 'tos', 'options']),
+	});
+
+	await playground.container.getByText('Update value').click();
+	await playground.submit.click();
+	await expect.poll(playground.result).toStrictEqual({
+		status: 'success',
+		initialValue: {
+			color: 'red',
+			languages: expect.arrayContaining(['English', 'French']),
+			tos: 'on',
+			options: expect.arrayContaining(['a', 'b', 'c', 'd']),
+		},
+		fields: expect.arrayContaining(['color', 'languages', 'tos', 'options']),
+	});
+}
+
+test('Client Validation: useInputControl', async ({ page }) => {
+	await page.goto('/custom-inputs?legacy=yes');
+	await runTest(page);
+});
+
+test('Server Validation: useInputControl', async ({ page }) => {
+	await page.goto('/custom-inputs?legacy=yes&noClientValidate=yes');
+	await runTest(page);
+});
+
+test('Client Validation: useControl', async ({ page }) => {
+	await page.goto('/custom-inputs');
+	await runTest(page);
+});
+
+test('Server Validation: useControl', async ({ page }) => {
+	await page.goto('/custom-inputs?noClientValidate=yes');
+	await runTest(page);
+});
+
+test('Client Validation: useInputControl with no key', async ({ page }) => {
+	await page.goto('/custom-inputs?legacy=yes&noKey=yes');
+	await runTest(page);
+});
+
+test('Server Validation: useInputControl with no key', async ({ page }) => {
+	await page.goto('/custom-inputs?legacy=yes&noClientValidate=yes&noKey=yes');
+	await runTest(page);
+});
+
+test('Client Validation: useControl with no key', async ({ page }) => {
+	await page.goto('/custom-inputs?noKey=yes');
+	await runTest(page);
+});
+
+test('Server Validation: useControl with no key', async ({ page }) => {
+	await page.goto('/custom-inputs?noClientValidate=yes&noKey=yes');
+	await runTest(page);
+});

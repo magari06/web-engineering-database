@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "jsx": "react",
+    "target": "ES2022", // required for top-level await
+    "module": "Node16",
+    "lib": ["ESNext", "dom"],
+    "moduleResolution": "Node16",
+    "esModuleInterop": true,
+    "strict": true,
+    "noImplicitAny": true,
+    "typeRoots": ["./src/@types", "./node_modules/", "./node_modules/@types", "types"],
+    "types": ["vitest/globals"],
+    "rootDir": "./",
+    "declaration": true,
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "~/*": ["*"]
+    }
+  },
+  "include": ["src/", "scripts/", "docs/", "config/", "playwright.config.ts", "e2e", "integration", "vitest.config.ts"],
+  "exclude": ["./src/@types"]
+}

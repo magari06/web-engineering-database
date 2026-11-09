@@ -1,0 +1,533 @@
+# s2-tokens-viewer
+
+## 0.3.10
+
+### Patch Changes
+
+- Updated dependencies [[`2218913`](https://github.com/adobe/spectrum-design-data/commit/2218913b576cb2e60cb9a7a672613a3b4a077eea)]:
+  - @adobe/design-data-wasm@0.17.0
+
+## 0.3.9
+
+### Patch Changes
+
+- Updated dependencies [[`c223628`](https://github.com/adobe/spectrum-design-data/commit/c2236288e5cfa47bfe9f4099abb24d03f7c10acf)]:
+  - @adobe/design-data-wasm@0.16.0
+
+## 0.3.8
+
+### Patch Changes
+
+- Updated dependencies [[`160dcb0`](https://github.com/adobe/spectrum-design-data/commit/160dcb099128afc1574ec9c7fdab5df28526eb53), [`33a5908`](https://github.com/adobe/spectrum-design-data/commit/33a59089334aacd04e73bebf9c088bd743aa2b93), [`4887473`](https://github.com/adobe/spectrum-design-data/commit/4887473689907243213225da695cc7944f9f0dfc), [`6080645`](https://github.com/adobe/spectrum-design-data/commit/608064534fc01696964d3dae7f09d61bd7dac29e), [`dd30d97`](https://github.com/adobe/spectrum-design-data/commit/dd30d97159cb02c9efe6cdd916c2faf5795fb9c1)]:
+  - @adobe/design-data-wasm@0.15.0
+
+## 0.3.7
+
+### Patch Changes
+
+- Updated dependencies [[`25df278`](https://github.com/adobe/spectrum-design-data/commit/25df2787641f42fbc3f845c09d36645e7846b1ac)]:
+  - @adobe/design-data-wasm@0.14.3
+
+## 0.3.6
+
+### Patch Changes
+
+- Updated dependencies [[`13f4851`](https://github.com/adobe/spectrum-design-data/commit/13f4851adab6c4e01ef3299cafb8c156bcfdfa19)]:
+  - @adobe/design-data-wasm@0.14.2
+
+## 0.3.5
+
+### Patch Changes
+
+- Updated dependencies [[`c4f6c2a`](https://github.com/adobe/spectrum-design-data/commit/c4f6c2abbbd7754deaf87c84bb4e3067364db9eb)]:
+  - @adobe/design-data-wasm@0.14.1
+
+## 0.3.4
+
+### Patch Changes
+
+- Updated dependencies [[`9e9a6fa`](https://github.com/adobe/spectrum-design-data/commit/9e9a6fa618b8e65a3d6ba19d83e9e6f00ec6ec46), [`371e96d`](https://github.com/adobe/spectrum-design-data/commit/371e96da286ddbf1341a8c9e5a60df06d06384a3), [`b0fcd0a`](https://github.com/adobe/spectrum-design-data/commit/b0fcd0a4bfb3c1c7dd28290436413db866131379), [`1b331ec`](https://github.com/adobe/spectrum-design-data/commit/1b331ecf575ea170fbec2b402d5835c2822de939), [`1975c4d`](https://github.com/adobe/spectrum-design-data/commit/1975c4dafc66d83b136a270adf726ad3b105fdc0), [`435d06b`](https://github.com/adobe/spectrum-design-data/commit/435d06b705453297fbf0cb7337e3b1781c36f9a2)]:
+  - @adobe/design-data-wasm@0.14.0
+
+## 0.3.3
+
+### Patch Changes
+
+- Updated dependencies [[`1ce36f6`](https://github.com/adobe/spectrum-design-data/commit/1ce36f66d777cd699034a2b87842a97e17315565)]:
+  - @adobe/design-data-wasm@0.13.0
+
+## 0.3.2
+
+### Patch Changes
+
+- Updated dependencies [[`326c51f`](https://github.com/adobe/spectrum-design-data/commit/326c51f09306fb0cc5fe493ec66ae89cb0f878ff), [`21c4d24`](https://github.com/adobe/spectrum-design-data/commit/21c4d240453333a8830c68a2e0afc4b18e9403b0), [`9b4ad35`](https://github.com/adobe/spectrum-design-data/commit/9b4ad35c29fb00193e5847625699afb04fa0c560), [`ab105f9`](https://github.com/adobe/spectrum-design-data/commit/ab105f972f0887aeaa9e385fb74a7384d6e761fa), [`9b4ad35`](https://github.com/adobe/spectrum-design-data/commit/9b4ad35c29fb00193e5847625699afb04fa0c560), [`19318d9`](https://github.com/adobe/spectrum-design-data/commit/19318d96723c39526f9f909fa44734f1e49874d6), [`9b4ad35`](https://github.com/adobe/spectrum-design-data/commit/9b4ad35c29fb00193e5847625699afb04fa0c560), [`9b4ad35`](https://github.com/adobe/spectrum-design-data/commit/9b4ad35c29fb00193e5847625699afb04fa0c560), [`9b4ad35`](https://github.com/adobe/spectrum-design-data/commit/9b4ad35c29fb00193e5847625699afb04fa0c560), [`9b4ad35`](https://github.com/adobe/spectrum-design-data/commit/9b4ad35c29fb00193e5847625699afb04fa0c560), [`0e42d28`](https://github.com/adobe/spectrum-design-data/commit/0e42d28bc2e6411bb950e3c4209d0c462e7ac43e), [`9b4ad35`](https://github.com/adobe/spectrum-design-data/commit/9b4ad35c29fb00193e5847625699afb04fa0c560), [`8934646`](https://github.com/adobe/spectrum-design-data/commit/89346465f929583bd76494270e4454df5af22381), [`9b4ad35`](https://github.com/adobe/spectrum-design-data/commit/9b4ad35c29fb00193e5847625699afb04fa0c560), [`4be4b79`](https://github.com/adobe/spectrum-design-data/commit/4be4b79699b7926bd59a71b3c145c673fe1bc5f2), [`706b12e`](https://github.com/adobe/spectrum-design-data/commit/706b12e542d49218571e4b9f2b478481a926c852), [`f4b0426`](https://github.com/adobe/spectrum-design-data/commit/f4b0426f1e2f6ff5f67f3d089daa6789451d2306), [`6d42e98`](https://github.com/adobe/spectrum-design-data/commit/6d42e98631aa1dd640fd244689ebb029f0f44f07), [`543d38a`](https://github.com/adobe/spectrum-design-data/commit/543d38aec31eb1b4893dc56ef710dca6b00b939e), [`2ec8e9e`](https://github.com/adobe/spectrum-design-data/commit/2ec8e9ed217a01bb81eefe8b1950be79e81cf98d), [`5770c02`](https://github.com/adobe/spectrum-design-data/commit/5770c0285f7c7d6a005752c7e37b8d89129a4e9a), [`f3d8058`](https://github.com/adobe/spectrum-design-data/commit/f3d8058832f9932aebf6732aaf176da58e0cde77), [`76edc46`](https://github.com/adobe/spectrum-design-data/commit/76edc466c835b4afa6f0368f959e2b08a39c24bc), [`bb1c83b`](https://github.com/adobe/spectrum-design-data/commit/bb1c83b3900d17aa119da65d20f388a6d98cba75), [`9b4ad35`](https://github.com/adobe/spectrum-design-data/commit/9b4ad35c29fb00193e5847625699afb04fa0c560), [`63c60e0`](https://github.com/adobe/spectrum-design-data/commit/63c60e09e16045552cb4b62c6b4d6e6d0b193dfb), [`7262883`](https://github.com/adobe/spectrum-design-data/commit/7262883c1d48038d08407ef6c907e896e13a415a), [`8dbea28`](https://github.com/adobe/spectrum-design-data/commit/8dbea2863b11a7dbfc1aee58314ad8a5ca040475), [`e43e55b`](https://github.com/adobe/spectrum-design-data/commit/e43e55b6570eb6350ff0a07d40823355b9b54bc7), [`63c60e0`](https://github.com/adobe/spectrum-design-data/commit/63c60e09e16045552cb4b62c6b4d6e6d0b193dfb), [`6b25821`](https://github.com/adobe/spectrum-design-data/commit/6b25821dfde7fc9d0f6401f7cb8ab436cbd34cab), [`9b4ad35`](https://github.com/adobe/spectrum-design-data/commit/9b4ad35c29fb00193e5847625699afb04fa0c560), [`9b4ad35`](https://github.com/adobe/spectrum-design-data/commit/9b4ad35c29fb00193e5847625699afb04fa0c560)]:
+  - @adobe/design-data-wasm@0.12.0
+
+## 0.3.1
+
+### Patch Changes
+
+- Updated dependencies [[`6c59c1f`](https://github.com/adobe/spectrum-design-data/commit/6c59c1ffc26ee80e11b1354c8e97d1479023af30), [`a60aeea`](https://github.com/adobe/spectrum-design-data/commit/a60aeea243b2ac4e812d46bbd9f7140c9f62f398)]:
+  - @adobe/design-data-wasm@0.11.3
+
+## 0.3.0
+
+### Minor Changes
+
+- [#1565](https://github.com/adobe/spectrum-design-data/pull/1565) [`4e4dae4`](https://github.com/adobe/spectrum-design-data/commit/4e4dae417be47ae59085072c6902f2aa119f093d) Thanks [@GarthDB](https://github.com/GarthDB)! - Add shareable deep links to the S2 tokens viewer (closes hwx4).
+  - **index.html**: `?q=` pre-fills the search and `?tab=` opens a tab,
+    for example `?q=corner-radius`. The URL stays in sync as you search
+    or switch tabs, and a "Copy link" button copies it.
+  - **css/viewer.css**: lays out the search box and copy button side by side.
+
+## 0.2.30
+
+### Patch Changes
+
+- Updated dependencies [[`be208ce`](https://github.com/adobe/spectrum-design-data/commit/be208cef23415ab779adbc49e2fcf7c9fdeca9b1)]:
+  - @adobe/design-data-wasm@0.11.2
+
+## 0.2.29
+
+### Patch Changes
+
+- Updated dependencies [[`15f371e`](https://github.com/adobe/spectrum-design-data/commit/15f371e50e2ce95a624a93152e408e1bbe8844dc), [`54ee322`](https://github.com/adobe/spectrum-design-data/commit/54ee322dc2fa9c6556549597a74610c290638664)]:
+  - @adobe/design-data-wasm@0.11.1
+  - @adobe/spectrum-tokens@15.6.0
+
+## 0.2.28
+
+### Patch Changes
+
+- Updated dependencies [[`a5fc42f`](https://github.com/adobe/spectrum-design-data/commit/a5fc42ff5dc5b1c0dbc569a733021061e3a57115), [`da64677`](https://github.com/adobe/spectrum-design-data/commit/da6467789ff0277102c4972703842fc0112e73eb)]:
+  - @adobe/spectrum-tokens@15.5.1
+  - @adobe/design-data-wasm@0.11.0
+
+## 0.2.27
+
+### Patch Changes
+
+- Updated dependencies [[`6375e4b`](https://github.com/adobe/spectrum-design-data/commit/6375e4b83333f51f012d8f95df35a20d8a792340)]:
+  - @adobe/design-data-wasm@0.10.4
+
+## 0.2.26
+
+### Patch Changes
+
+- Updated dependencies [[`e693b15`](https://github.com/adobe/spectrum-design-data/commit/e693b15fb1d233b6f70aed2a85532afdf949c8eb), [`a0154dc`](https://github.com/adobe/spectrum-design-data/commit/a0154dc39e460942cd4ab4a755e9e76130400d5d), [`ec3376f`](https://github.com/adobe/spectrum-design-data/commit/ec3376fa833f2c31dd0b2340590134b2747b00c4), [`1cce74b`](https://github.com/adobe/spectrum-design-data/commit/1cce74b35a7ecb48302b7114cd89063604ca8440)]:
+  - @adobe/design-data-wasm@0.10.3
+  - @adobe/spectrum-tokens@15.5.0
+
+## 0.2.25
+
+### Patch Changes
+
+- Updated dependencies [[`738ff48`](https://github.com/adobe/spectrum-design-data/commit/738ff487e7a858d846e998f6b370755fe5929b6b)]:
+  - @adobe/design-data-wasm@0.10.2
+
+## 0.2.24
+
+### Patch Changes
+
+- Updated dependencies [[`b9888b8`](https://github.com/adobe/spectrum-design-data/commit/b9888b8ce9a0e4ec5b607e088942999629d5d43d)]:
+  - @adobe/design-data-wasm@0.10.1
+
+## 0.2.23
+
+### Patch Changes
+
+- Updated dependencies [[`2ee9fa8`](https://github.com/adobe/spectrum-design-data/commit/2ee9fa8ccc042e00a57811477a6abdd341b13c1b), [`da4e7d1`](https://github.com/adobe/spectrum-design-data/commit/da4e7d14b5a35a6c1e516b54b1797425145599c0), [`da4e7d1`](https://github.com/adobe/spectrum-design-data/commit/da4e7d14b5a35a6c1e516b54b1797425145599c0)]:
+  - @adobe/design-data-wasm@0.10.0
+
+## 0.2.22
+
+### Patch Changes
+
+- Updated dependencies [[`d88be4e`](https://github.com/adobe/spectrum-design-data/commit/d88be4e0204abb31d9f02ce680acd0fe478057a7)]:
+  - @adobe/spectrum-tokens@15.4.1
+
+## 0.2.21
+
+### Patch Changes
+
+- Updated dependencies [[`fab8733`](https://github.com/adobe/spectrum-design-data/commit/fab873306f0798c8a2f3d532e6df4eca4e0b7460)]:
+  - @adobe/spectrum-tokens@15.4.0
+
+## 0.2.20
+
+### Patch Changes
+
+- Updated dependencies [[`47db5e9`](https://github.com/adobe/spectrum-design-data/commit/47db5e9c8069b90e7377a0096ad18fa72c86fb2c)]:
+  - @adobe/design-data-wasm@0.9.0
+
+## 0.2.19
+
+### Patch Changes
+
+- Updated dependencies [[`0c2efe3`](https://github.com/adobe/spectrum-design-data/commit/0c2efe3b039cf5ee59e9dcbaa0c1fa9a59d807ee), [`d3ae6e3`](https://github.com/adobe/spectrum-design-data/commit/d3ae6e3e0a5a35223ac687a72e4b7e6580256eea)]:
+  - @adobe/design-data-wasm@0.8.0
+
+## 0.2.18
+
+### Patch Changes
+
+- Updated dependencies [[`6005339`](https://github.com/adobe/spectrum-design-data/commit/6005339a0678226eee3e827fd5bbfa793f5bccc7)]:
+  - @adobe/spectrum-tokens@15.3.0
+
+## 0.2.17
+
+### Patch Changes
+
+- Updated dependencies [[`17239f3`](https://github.com/adobe/spectrum-design-data/commit/17239f31fe23279e1034ef4dd1d1c3072d550a16), [`eb6e57f`](https://github.com/adobe/spectrum-design-data/commit/eb6e57f47c6bb38e2675418e9ef7f0737a385f3b), [`3aa312d`](https://github.com/adobe/spectrum-design-data/commit/3aa312db6a055108f685b832dfafdf195ab088fc), [`e0300ab`](https://github.com/adobe/spectrum-design-data/commit/e0300ab6167bc237c83d9d45885a10405c10b974)]:
+  - @adobe/design-data-wasm@0.7.0
+
+## 0.2.16
+
+### Patch Changes
+
+- Updated dependencies [[`cc15f52`](https://github.com/adobe/spectrum-design-data/commit/cc15f524d616e7fe602fa7445950ec89ec7a7279), [`adf5595`](https://github.com/adobe/spectrum-design-data/commit/adf55951bf3c753f5c448d869c04959cc229bf6b)]:
+  - @adobe/design-data-wasm@0.6.0
+
+## 0.2.15
+
+### Patch Changes
+
+- Updated dependencies [[`a734594`](https://github.com/adobe/spectrum-design-data/commit/a734594d1592701632f790a58992a904df579ee1)]:
+  - @adobe/spectrum-tokens@15.2.0
+
+## 0.2.14
+
+### Patch Changes
+
+- Updated dependencies [[`a7d3693`](https://github.com/adobe/spectrum-design-data/commit/a7d369357d997fa3f678225a220d26e5cb7f81ee), [`4b841f2`](https://github.com/adobe/spectrum-design-data/commit/4b841f2dba5089bd37f96afd6c22d98c93401f62), [`30a282c`](https://github.com/adobe/spectrum-design-data/commit/30a282c7c6493188cc6370e20be5eb3bd783048c), [`01e7a9c`](https://github.com/adobe/spectrum-design-data/commit/01e7a9cce239d42167dc88fdc998c3a87413c1dd), [`fdff7f5`](https://github.com/adobe/spectrum-design-data/commit/fdff7f5af05b19e61ecb6d20c87df0b77445109b)]:
+  - @adobe/design-data-wasm@0.5.0
+
+## 0.2.13
+
+### Patch Changes
+
+- Updated dependencies [[`46a5a8b`](https://github.com/adobe/spectrum-design-data/commit/46a5a8baf54063697b476c90196adf186231654b), [`46a5a8b`](https://github.com/adobe/spectrum-design-data/commit/46a5a8baf54063697b476c90196adf186231654b), [`33225fb`](https://github.com/adobe/spectrum-design-data/commit/33225fb76a313247bcd054a6ef21eb6dbeb7ebbc)]:
+  - @adobe/design-data-wasm@0.4.5
+
+## 0.2.12
+
+### Patch Changes
+
+- [#1350](https://github.com/adobe/spectrum-design-data/pull/1350) [`432ec03`](https://github.com/adobe/spectrum-design-data/commit/432ec03bfbe7754a1a99c6acc24d7ccd50f16d75) Thanks [@GarthDB](https://github.com/GarthDB)! - Fix crash and duplicate work in resolve.mjs found in review of #1341.
+  - **scripts/resolve.mjs**: `loadCascadeTokens()` now throws a clear error naming
+    `moon run viewer:convert` when `cascade/` is missing, instead of an uncaught `ENOENT`.
+  - **scripts/resolve.mjs**: merge `buildColorComponentFile()` and `buildLayoutComponentFile()`
+    into a single `buildComponentFiles()` pass over `tokensDir` so each component token file is
+    read, parsed, and checked for color-domain only once instead of twice.
+
+## 0.2.11
+
+### Patch Changes
+
+- [#1340](https://github.com/adobe/spectrum-design-data/pull/1340) [`153a664`](https://github.com/adobe/spectrum-design-data/commit/153a6649ddee60997d57a6be2c30a46543886cc9) Thanks [@GarthDB](https://github.com/GarthDB)! - Restore search/resolution for component tokens broken by the CTR migration (#1330).
+  - **scripts/resolve.mjs**: add `buildLayoutComponentFile()` (mirrors `buildColorComponentFile()`)
+    so non-color component tokens land in `tokens/layout-component.json` again — they're rendered
+    and searchable, not just the color subset #1335 already fixed.
+  - **scripts/resolve.mjs**: build the wasm `Dataset` from the viewer's own cascade-converted
+    source via `Dataset.fromTokens()` instead of the stale `Dataset.embedded()` snapshot, so
+    component-token aliases resolve to real values instead of showing raw `{ref}` strings.
+  - **moon.yml**: add a `convert` task (`design-data-cli migrate convert`) that produces the
+    cascade files `resolve` now consumes.
+  - **scripts/resolve.mjs**: `buildLayoutComponentFile()` now seeds from the pristine
+    `node_modules/@adobe/spectrum-tokens/src/layout-component.json` instead of its own prior
+    output, so re-running `resolve.mjs` drops tokens renamed/removed upstream instead of
+    accumulating them forever.
+
+- Updated dependencies [[`9c697cf`](https://github.com/adobe/spectrum-design-data/commit/9c697cfcee3820ddc7bc3688ea000552de708641)]:
+  - @adobe/spectrum-tokens@15.1.0
+
+## 0.2.10
+
+### Patch Changes
+
+- [#1335](https://github.com/adobe/spectrum-design-data/pull/1335) [`39c90de`](https://github.com/adobe/spectrum-design-data/commit/39c90de5b658f82e0a14772e4dd1247200fe9efc) Thanks [@GarthDB](https://github.com/GarthDB)! - Fix broken tabs (closes viewer report from Matt Davey).
+  - **index.html**: stop dropping failed fetches from the results array before
+    `init()` destructures it positionally — a single missing file no longer
+    shifts every later tab's data into the wrong slot.
+  - **scripts/resolve.mjs**: regenerate `tokens/color-component.json` at build
+    time from the CTR-authored per-component token files (removed upstream in
+    #1330), restoring the Component colors tab.
+
+## 0.2.9
+
+### Patch Changes
+
+- Updated dependencies [[`afbadb2`](https://github.com/adobe/spectrum-design-data/commit/afbadb23a3ddd75640777909cdf97b849fc0daa7)]:
+  - @adobe/spectrum-tokens@15.0.0
+
+## 0.2.8
+
+### Patch Changes
+
+- Updated dependencies [[`7652ef9`](https://github.com/adobe/spectrum-design-data/commit/7652ef92131342c3c2b8c3c1f3371f31ddc62fa8)]:
+  - @adobe/design-data-wasm@0.4.4
+
+## 0.2.7
+
+### Patch Changes
+
+- Updated dependencies [[`6acda22`](https://github.com/adobe/spectrum-design-data/commit/6acda2204f29884a09760076357ddd89954889f5)]:
+  - @adobe/design-data-wasm@0.4.3
+
+## 0.2.6
+
+### Patch Changes
+
+- Updated dependencies [[`df80f34`](https://github.com/adobe/spectrum-design-data/commit/df80f347baa0a9ae056804232228ae9fe3e55fae)]:
+  - @adobe/design-data-wasm@0.4.2
+
+## 0.2.5
+
+### Patch Changes
+
+- Updated dependencies [[`b4f79db`](https://github.com/adobe/spectrum-design-data/commit/b4f79db78d8b889b46b98d0fc26d424c1d4fe5fe), [`62e74d7`](https://github.com/adobe/spectrum-design-data/commit/62e74d7f4d59bcc3e63fbc5b7c594f65ef78b024), [`8d8bf09`](https://github.com/adobe/spectrum-design-data/commit/8d8bf0904e716ed86b10f890251980f73f0215c7)]:
+  - @adobe/spectrum-tokens@14.15.0
+
+## 0.2.4
+
+### Patch Changes
+
+- Updated dependencies [[`0297e7e`](https://github.com/adobe/spectrum-design-data/commit/0297e7ee77e102a3756302f83ab9236cd142ee58), [`b57ae32`](https://github.com/adobe/spectrum-design-data/commit/b57ae328a91c68f25bbf51fffecb6c5f3bed3e8f)]:
+  - @adobe/spectrum-tokens@14.14.0
+
+## 0.2.3
+
+### Patch Changes
+
+- Updated dependencies [[`dcf0832`](https://github.com/adobe/spectrum-design-data/commit/dcf083214d56989817db192801638e3ec20e2306)]:
+  - @adobe/spectrum-tokens@14.13.2
+
+## 0.2.2
+
+### Patch Changes
+
+- Updated dependencies [[`eac1cb3`](https://github.com/adobe/spectrum-design-data/commit/eac1cb3121eda40c929e333f1375c75895244882)]:
+  - @adobe/spectrum-tokens@14.13.1
+
+## 0.2.1
+
+### Patch Changes
+
+- Updated dependencies [[`2573230`](https://github.com/adobe/spectrum-design-data/commit/2573230d0ccd39214adae0fde0c4a52e997445ca)]:
+  - @adobe/spectrum-tokens@14.13.0
+
+## 0.2.0
+
+### Minor Changes
+
+- [#1145](https://github.com/adobe/spectrum-design-data/pull/1145) [`04aaa7f`](https://github.com/adobe/spectrum-design-data/commit/04aaa7fe6a1aaa3d04c2dc03cb17dd8a1b15e8bb) Thanks [@GarthDB](https://github.com/GarthDB)! - Switch s2-tokens-viewer token resolution from runtime to build-time wasm.
+  - **scripts/resolve.mjs**: new build-time script; drives `Dataset.embedded()` via
+    `@adobe/design-data-wasm` (node) to pre-resolve all 2,460 slugs into
+    `tokens/resolved.json` (values + chains per context).
+  - **moon.yml**: new `resolve` task (`sdk-wasm:build` + `prepare` deps);
+    `export` now depends on `resolve` so `resolved.json` ships to `site/`.
+  - **index.html**: replace inline `TokenResolver`/`TokenResolverFactory` (~190 lines)
+    with `createResolvedLookup(map, type)`; all call sites unchanged.
+  - **deploy-docs.yml**: add Rust toolchain + wasm-pack steps; drop stale
+    `s2-tokens-viewer:export` line (correct id is `viewer`).
+
+### Patch Changes
+
+- [#1147](https://github.com/adobe/spectrum-design-data/pull/1147) [`cece05d`](https://github.com/adobe/spectrum-design-data/commit/cece05de03dd8b43cfeb697d045eb4302a34b26c) Thanks [@GarthDB](https://github.com/GarthDB)! - Fix set-level alias resolution in `resolve_reference` after cache reload.
+  - **`sdk/core/src/graph.rs`**: add `set_uuid_index` (set_uuid → all children) populated in
+    all graph builders and `rebuild_uuid_index`; add `resolve_set_in_context` and
+    `resolve_alias_in_context` for context-aware chain walking through set-level UUID aliases.
+  - **`sdk/core/src/cascade.rs`**: extract `resolve_reference(graph, slug, ctx)` as a
+    testable core function with deterministic tie-breaking and graceful dangling-ref handling.
+  - **`sdk/wasm/src/dataset.rs`**: delegate `resolveReference` to the core function;
+    remove spike-status comment.
+  - **`packages/design-data-spec/conformance/reference/`**: 4 new fixture-driven
+    conformance cases (set-alias-light, set-alias-dark, dangling-ref, unknown-slug).
+  - **`sdk/wasm/test/parity.test.js`**: 7 new parity tests (wireframe, scale, set-alias
+    regression, dangling-ref degradation, stable tie-break).
+  - **`docs/s2-tokens-viewer/scripts/resolve.mjs`**: remove JS fallback (now redundant);
+    `wasm: 9062 | fallback: 0 | missing: 0`.
+
+- Updated dependencies [[`cece05d`](https://github.com/adobe/spectrum-design-data/commit/cece05de03dd8b43cfeb697d045eb4302a34b26c)]:
+  - @adobe/design-data-wasm@0.4.0
+
+## 0.1.24
+
+### Patch Changes
+
+- Updated dependencies [[`60a4835`](https://github.com/adobe/spectrum-design-data/commit/60a4835e245965639a4ac89b41d2884dd63a0bbb)]:
+  - @adobe/spectrum-tokens@14.12.0
+
+## 0.1.23
+
+### Patch Changes
+
+- Updated dependencies [[`e9974fb`](https://github.com/adobe/spectrum-design-data/commit/e9974fb7360e849e928b31518b073996b49ecd6b), [`ba06968`](https://github.com/adobe/spectrum-design-data/commit/ba06968226adb268600e0ed1befc9d381e7986b6)]:
+  - @adobe/spectrum-tokens@14.11.0
+
+## 0.1.22
+
+### Patch Changes
+
+- Updated dependencies [[`dfddf12`](https://github.com/adobe/spectrum-design-data/commit/dfddf123e92ff31eeb8a71bb6350f189ef39de13)]:
+  - @adobe/spectrum-tokens@14.10.0
+
+## 0.1.21
+
+### Patch Changes
+
+- Updated dependencies [[`c133c83`](https://github.com/adobe/spectrum-design-data/commit/c133c832f605e6f09b8bc5db80a6f98b46233b2c)]:
+  - @adobe/spectrum-tokens@14.9.0
+
+## 0.1.20
+
+### Patch Changes
+
+- Updated dependencies [[`af22092`](https://github.com/adobe/spectrum-design-data/commit/af22092744c70af7ce0c659e16cdabe31b92b111)]:
+  - @adobe/spectrum-tokens@14.8.0
+
+## 0.1.19
+
+### Patch Changes
+
+- Updated dependencies [[`c28702f`](https://github.com/adobe/spectrum-design-data/commit/c28702f19ad408d3dc1461bb059a1c7125f7d32f)]:
+  - @adobe/spectrum-tokens@14.7.0
+
+## 0.1.18
+
+### Patch Changes
+
+- Updated dependencies [[`b11942c`](https://github.com/adobe/spectrum-design-data/commit/b11942cf52ec0077cfd53d8cb70ca722dc88c2e0)]:
+  - @adobe/spectrum-tokens@14.6.0
+
+## 0.1.17
+
+### Patch Changes
+
+- Updated dependencies [[`efab669`](https://github.com/adobe/spectrum-design-data/commit/efab6690442052fb94fd5d198fc56594e6be28e5)]:
+  - @adobe/spectrum-tokens@14.5.0
+
+## 0.1.16
+
+### Patch Changes
+
+- Updated dependencies [[`55bf38f`](https://github.com/adobe/spectrum-design-data/commit/55bf38f81bacd49f2db0a54cde91bbf311dda23f)]:
+  - @adobe/spectrum-tokens@14.4.0
+
+## 0.1.15
+
+### Patch Changes
+
+- Updated dependencies [[`a6d8f51`](https://github.com/adobe/spectrum-design-data/commit/a6d8f51a72409d2d8bbc509e2262aaa5f34cd0f1)]:
+  - @adobe/spectrum-tokens@14.3.0
+
+## 0.1.14
+
+### Patch Changes
+
+- Updated dependencies [[`80b1637`](https://github.com/adobe/spectrum-design-data/commit/80b163712ae7ac42b9892b0fd4001b1bb27ba1ac)]:
+  - @adobe/spectrum-tokens@14.2.3
+
+## 0.1.13
+
+### Patch Changes
+
+- Updated dependencies [[`3f05fcf`](https://github.com/adobe/spectrum-design-data/commit/3f05fcffcd8641c822a54c4cdd37ba452dab455c), [`956d61a`](https://github.com/adobe/spectrum-design-data/commit/956d61a00f154e7c488edf6916b0ce16945a814c)]:
+  - @adobe/spectrum-tokens@14.2.2
+
+## 0.1.12
+
+### Patch Changes
+
+- Updated dependencies [[`49ad47b`](https://github.com/adobe/spectrum-design-data/commit/49ad47bea61952f84eb86b214954136049aca376)]:
+  - @adobe/spectrum-tokens@14.2.1
+
+## 0.1.11
+
+### Patch Changes
+
+- Updated dependencies [[`c051815`](https://github.com/adobe/spectrum-design-data/commit/c05181505730ec911196c4b6d37d106bccd742e5)]:
+  - @adobe/spectrum-tokens@14.2.0
+
+## 0.1.10
+
+### Patch Changes
+
+- Updated dependencies [[`ae68c41`](https://github.com/adobe/spectrum-design-data/commit/ae68c412101b32b114d0d56893d1214f5225210a)]:
+  - @adobe/spectrum-tokens@14.1.0
+
+## 0.1.9
+
+### Patch Changes
+
+- Updated dependencies [[`fa28b11`](https://github.com/adobe/spectrum-design-data/commit/fa28b117c6b84776f4ebe9bb281c29e14e0d64b6)]:
+  - @adobe/spectrum-tokens@14.0.0
+
+## 0.1.8
+
+### Patch Changes
+
+- Updated dependencies [[`f64bee3`](https://github.com/adobe/spectrum-design-data/commit/f64bee3900c874775f2d3424516786a0d644d057)]:
+  - @adobe/spectrum-tokens@13.16.0
+
+## 0.1.7
+
+### Patch Changes
+
+- Updated dependencies [[`1e860c4`](https://github.com/adobe/spectrum-design-data/commit/1e860c4436c58ceca6f4500ea7e24d6d8cdd20c8)]:
+  - @adobe/spectrum-tokens@13.15.1
+
+## 0.1.6
+
+### Patch Changes
+
+- Updated dependencies [[`3df7197`](https://github.com/adobe/spectrum-design-data/commit/3df7197e7da23c9bb107f7dfcd935b5c62a86041)]:
+  - @adobe/spectrum-tokens@13.15.0
+
+## 0.1.5
+
+### Patch Changes
+
+- Updated dependencies [[`b4df84e`](https://github.com/adobe/spectrum-design-data/commit/b4df84e2f2ca246332907f9ddda94438288dd98e)]:
+  - @adobe/spectrum-tokens@13.14.1
+
+## 0.1.4
+
+### Patch Changes
+
+- Updated dependencies [[`336f672`](https://github.com/adobe/spectrum-design-data/commit/336f67216dfd875f0feb65c10059d9f3fe6dcaf7)]:
+  - @adobe/spectrum-tokens@13.14.0
+
+## 0.1.3
+
+### Patch Changes
+
+- Updated dependencies [[`1d4973e`](https://github.com/adobe/spectrum-design-data/commit/1d4973e78d814575da231c2c4080ead8a190d2fc)]:
+  - @adobe/spectrum-tokens@13.13.0
+
+## 0.1.2
+
+### Patch Changes
+
+- [#544](https://github.com/adobe/spectrum-design-data/pull/544) [`18dc0e1`](https://github.com/adobe/spectrum-design-data/commit/18dc0e12537e73d7290ae9b227754b5240807cf3) Thanks [@GarthDB](https://github.com/GarthDB)! - Fix moon.yml command chaining syntax for newer moon version
+
+  Updated command chaining in moon.yml tasks to use proper shell syntax instead of && as array elements. This resolves issues with the viewer:export task failing after moon version update.
+
+## 0.1.1
+
+### Patch Changes
+
+- [#533](https://github.com/adobe/spectrum-design-data/pull/533) [`27fe5e4`](https://github.com/adobe/spectrum-design-data/commit/27fe5e44fed13b7b1fddd02f614251cc47c4f8eb) Thanks [@GarthDB](https://github.com/GarthDB)! - Improve S2 tokens viewer self-containment and deployment
+
+  **Enhancements:**
+  - Add workspace dependency on `@adobe/spectrum-tokens` package
+  - Add prepare script to automatically copy token files locally
+  - Update file paths to use relative paths instead of absolute paths
+  - Make viewer fully self-contained with local token files
+
+  **Technical Changes:**
+  - Updated `package.json` to include workspace dependency and prepare script
+  - Modified `index.html` to load token files from relative paths (`packages/tokens/src/`)
+  - Added local copies of all Spectrum 2 token JSON files for standalone operation
+
+  These changes make the S2 tokens viewer easier to deploy and more portable, eliminating dependencies on external file paths while maintaining full functionality.

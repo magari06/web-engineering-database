@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opensource.adobe.com/spectrum-design-data/schemas/v0/dataset.schema.json",
+  "title": "Dataset root descriptor",
+  "description": "Optional root descriptor (dataset.json) a design-data dataset MAY carry to declare which optional directories are present, pin the targeted spec version, and override default discovery paths. Absence of this file is not an error; see spec/dataset-layout.md.",
+  "type": "object",
+  "properties": {
+    "specVersion": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The spec version this dataset targets (e.g. \"1.0.0-draft\")."
+    },
+    "directories": {
+      "type": "object",
+      "description": "Declares which registered directories the dataset provides. List a directory key with the value true to declare it present and authoritative; omit the key otherwise. The value is constrained to true so the flag cannot be used to negate a directory's presence (in particular it cannot waive the required tokens/ directory).",
+      "properties": {
+        "tokens": { "const": true },
+        "components": { "const": true },
+        "fields": { "const": true },
+        "modeSets": { "const": true },
+        "registry": { "const": true },
+        "guidelines": { "const": true },
+        "icons": { "const": true }
+      },
+      "additionalProperties": false
+    },
+    "paths": {
+      "type": "object",
+      "description": "Optional overrides for the default discovery paths, relative to the dataset root. When omitted, tooling uses the conventional directory names defined in spec/dataset-layout.md.",
+      "properties": {
+        "tokens": { "type": "string", "minLength": 1 },
+        "components": { "type": "string", "minLength": 1 },
+        "fields": { "type": "string", "minLength": 1 },
+        "modeSets": { "type": "string", "minLength": 1 },
+        "registry": { "type": "string", "minLength": 1 },
+        "guidelines": { "type": "string", "minLength": 1 },
+        "icons": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

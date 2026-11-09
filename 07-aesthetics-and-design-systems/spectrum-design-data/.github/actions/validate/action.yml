@@ -1,0 +1,293 @@
+# Copyright 2026 Adobe. All rights reserved.
+# This file is licensed to you under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License. You may obtain a copy
+# of the License at http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software distributed under
+# the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+# OF ANY KIND, either express or implied. See the License for the specific language
+# governing permissions and limitations under the License.
+
+name: Validate design-data
+description: >
+  Installs the design-data CLI and validates a platform repo's dataset and
+  manifest against the Spectrum foundation, including a foundation-drift
+  check against the foundation's latest tag.
+
+inputs:
+  dataset-path:
+    description: "Path to the dataset root passed to validate-dataset/validate-manifest"
+    required: false
+    default: "."
+  skip-dataset-validation:
+    description: >
+      Set to 'true' to skip validate-dataset. Use this for manifest-only overlay repos
+      (foundation pinned remotely via `.design-data.toml`, only local extensions/overrides)
+      that have no local tokens/ directory — validate-dataset's SPEC-044 structure check
+      requires one and fails unconditionally without it.
+    required: false
+    default: "false"
+  manifest:
+    description: "Path to the platform manifest.json"
+    required: false
+    default: "manifest.json"
+  cli-version:
+    description: "design-data-cli release version to install, or 'latest'"
+    required: false
+    default: "latest"
+  install-method:
+    description: "How to install the CLI: 'release' (direct binary download) or 'homebrew'"
+    required: false
+    default: "release"
+  foundation-repo:
+    description: "owner/repo of the Spectrum foundation to check for drift"
+    required: false
+    default: "adobe/spectrum-design-data"
+  foundation-tag-prefix:
+    description: "Tag prefix identifying foundation release tags in foundation-repo"
+    required: false
+    default: "@adobe/spectrum-design-data@"
+  drift-mode:
+    description: "'warn' (annotate only) or 'fail' (block the PR) on foundation drift"
+    required: false
+    default: "warn"
+  open-issue:
+    description: "Open a 'foundation moved' issue when drift is detected"
+    required: false
+    default: "false"
+  open-pr:
+    description: >
+      Open a pull request that bumps foundationVersion (and the `tag` in a sibling
+      .design-data.toml, if present) to the latest foundation release when drift
+      is detected. Needs `contents: write` and `pull-requests: write`. Skipped on
+      pull_request events; run it from a schedule or a push to the default branch.
+    required: false
+    default: "false"
+  install-only:
+    description: >
+      Set to 'true' to only install the design-data CLI onto PATH and skip validation,
+      drift checks, and issue/PR steps. Use it to run the CLI from your own steps
+      (for example a consumer-codegen smoke test).
+    required: false
+    default: "false"
+  github-token:
+    description: "GitHub token for release lookups, tag lookups, issue creation, and bump PRs"
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  dataset-valid:
+    description: "Whether validate-dataset passed (true/false), or empty if skip-dataset-validation is 'true'"
+    value: ${{ steps.validate-dataset.outputs.valid }}
+  manifest-valid:
+    description: "Whether validate-manifest passed (true/false)"
+    value: ${{ steps.validate-manifest.outputs.valid }}
+  foundation-drift:
+    description: "Whether the pinned foundationVersion is behind the foundation's latest tag"
+    value: ${{ steps.drift.outputs.drift }}
+  pinned-foundation-version:
+    description: "foundationVersion pinned in the manifest"
+    value: ${{ steps.drift.outputs.pinned }}
+  latest-foundation-version:
+    description: "Latest foundation version found in foundation-repo"
+    value: ${{ steps.drift.outputs.latest }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install design-data CLI (release binary)
+      if: inputs.install-method == 'release'
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -euo pipefail
+        version="${{ inputs.cli-version }}"
+        if [[ "$version" == "latest" ]]; then
+          version=$("$GITHUB_ACTION_PATH/scripts/resolve-latest-cli-version.sh" adobe/spectrum-design-data)
+          if [[ -z "$version" ]]; then
+            echo "::error::could not find a design-data-cli@* release tag" >&2
+            exit 1
+          fi
+        fi
+        tag="design-data-cli@${version}"
+        asset=$("$GITHUB_ACTION_PATH/scripts/cli-asset-name.sh" "$RUNNER_OS" "$RUNNER_ARCH")
+        mkdir -p "$RUNNER_TEMP/design-data-cli"
+        curl -fsSL \
+          "https://github.com/adobe/spectrum-design-data/releases/download/${tag//@/%40}/${asset}" \
+          -o "$RUNNER_TEMP/design-data-cli/design-data"
+        chmod +x "$RUNNER_TEMP/design-data-cli/design-data"
+        echo "$RUNNER_TEMP/design-data-cli" >> "$GITHUB_PATH"
+
+    - name: Install design-data CLI (Homebrew)
+      if: inputs.install-method == 'homebrew'
+      shell: bash
+      run: |
+        set -euo pipefail
+        version="${{ inputs.cli-version }}"
+        brew tap adobe/spectrum-design-data https://github.com/adobe/spectrum-design-data
+        if [[ "$version" == "latest" ]]; then
+          brew install adobe/spectrum-design-data/design-data
+        else
+          # brew extract walks the tap's git history (rewritten on every release
+          # by the auto-bump step in release.yml) to reconstruct the formula as
+          # it was at the pinned version.
+          brew tap-new --no-git homebrew/local || true
+          brew extract --version="$version" adobe/spectrum-design-data/design-data homebrew/local
+          brew install "homebrew/local/design-data@${version}"
+        fi
+
+    - name: Validate dataset
+      id: validate-dataset
+      if: inputs.install-only != 'true' && inputs.skip-dataset-validation != 'true'
+      shell: bash
+      run: |
+        set +e
+        design-data validate-dataset "${{ inputs.dataset-path }}" --strict --format json \
+          | tee /tmp/validate-dataset.json
+        code=${PIPESTATUS[0]}
+        set -e
+        echo "valid=$([[ $code -eq 0 ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+        exit $code
+
+    - name: Validate manifest
+      id: validate-manifest
+      if: inputs.install-only != 'true'
+      shell: bash
+      run: |
+        set +e
+        design-data validate-manifest "${{ inputs.dataset-path }}" \
+          --manifest "${{ inputs.manifest }}" --format json \
+          | tee /tmp/validate-manifest.json
+        code=${PIPESTATUS[0]}
+        set -e
+        echo "valid=$([[ $code -eq 0 ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+        exit $code
+
+    - name: Check foundation drift
+      id: drift
+      if: inputs.install-only != 'true'
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -euo pipefail
+        pinned=$(jq -r '.foundationVersion' "${{ inputs.manifest }}")
+        prefix="${{ inputs.foundation-tag-prefix }}"
+        # foundationVersion may be a bare semver or the full tag string; normalize to bare.
+        pinned="${pinned#"$prefix"}"
+        latest=$(gh api "repos/${{ inputs.foundation-repo }}/tags" --paginate \
+          --jq '.[].name | select(startswith("'"$prefix"'"))' \
+          | sed "s|^${prefix}||" | grep -v -- '-' | sort -V | tail -1 || true)
+
+        echo "pinned=$pinned" >> "$GITHUB_OUTPUT"
+        echo "latest=$latest" >> "$GITHUB_OUTPUT"
+
+        if [[ -z "$latest" || "$pinned" == "$latest" ]]; then
+          echo "drift=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        # A pin that is a bare semver can be compared; anything else (e.g. a tag from a
+        # different package) still reports drift but is never auto-bumped.
+        bumpable=false
+        if [[ "$pinned" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          if [[ "$(printf '%s\n%s\n' "$pinned" "$latest" | sort -V | tail -1)" == "$pinned" ]]; then
+            echo "::warning::Manifest pins ${prefix}${pinned}, ahead of latest ${prefix}${latest}; not reporting drift."
+            echo "drift=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          bumpable=true
+        fi
+        echo "bumpable=$bumpable" >> "$GITHUB_OUTPUT"
+        echo "drift=true" >> "$GITHUB_OUTPUT"
+        message="Foundation moved: manifest pins ${prefix}${pinned}, latest is ${prefix}${latest}"
+        if [[ "${{ inputs.drift-mode }}" == "fail" ]]; then
+          echo "::error::${message}"
+          exit 1
+        else
+          echo "::warning::${message}"
+        fi
+
+    - name: Open foundation-moved issue
+      if: inputs.open-issue == 'true' && steps.drift.outputs.drift == 'true'
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -euo pipefail
+        title="Foundation moved: ${{ steps.drift.outputs.pinned }} → ${{ steps.drift.outputs.latest }}"
+        existing=$(gh issue list --search "in:title \"${title}\"" --state open --json title \
+          --jq 'length')
+        if [[ "$existing" -gt 0 ]]; then
+          echo "Issue already open for this drift, skipping."
+          exit 0
+        fi
+        gh issue create --title "$title" --body "$(cat <<EOF
+        The foundation dataset (\`${{ inputs.foundation-repo }}\`) has moved past the
+        version pinned in \`${{ inputs.manifest }}\`.
+
+        - Pinned: \`${{ steps.drift.outputs.pinned }}\`
+        - Latest: \`${{ steps.drift.outputs.latest }}\`
+
+        Review the foundation changelog and update \`foundationVersion\` in
+        \`${{ inputs.manifest }}\` once the platform overrides have been checked
+        against the new release.
+        EOF
+        )"
+
+    - name: Open foundation bump PR
+      if: >-
+        ${{ !cancelled() && inputs.open-pr == 'true'
+        && steps.drift.outputs.drift == 'true' && steps.drift.outputs.bumpable == 'true'
+        && github.event_name != 'pull_request' }}
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        MANIFEST: ${{ inputs.manifest }}
+        PREFIX: ${{ inputs.foundation-tag-prefix }}
+        PINNED: ${{ steps.drift.outputs.pinned }}
+        LATEST: ${{ steps.drift.outputs.latest }}
+      run: |
+        set -euo pipefail
+        branch="foundation-bump/${LATEST}"
+        open=$(gh pr list --head "$branch" --state open --json number --jq 'length')
+        if [[ "$open" -gt 0 ]]; then
+          echo "PR already open for ${branch}, skipping."
+          exit 0
+        fi
+
+        # Keep the manifest's existing style: full tag when it had the prefix, else bare.
+        current=$(jq -r '.foundationVersion' "$MANIFEST")
+        if [[ "$current" == "$PREFIX"* ]]; then
+          new="${PREFIX}${LATEST}"
+        else
+          new="$LATEST"
+        fi
+
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        base=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
+        # A closed PR can leave the bump branch behind; track it so --force-with-lease has a ref.
+        git fetch origin "$branch" 2>/dev/null || true
+        git checkout -B "$branch"
+
+        tmp=$(mktemp)
+        jq --arg v "$new" '.foundationVersion = $v' "$MANIFEST" > "$tmp"
+        mv "$tmp" "$MANIFEST"
+        git add "$MANIFEST"
+
+        # .design-data.toml pins the full foundation tag (the fetcher uses it verbatim)
+        # next to the manifest, regardless of the manifest's own style.
+        toml="$(dirname "$MANIFEST")/.design-data.toml"
+        if [[ -f "$toml" ]] && grep -q '^tag *= *"' "$toml"; then
+          sed -i.bak "s|^tag *= *\".*\"|tag = \"${PREFIX}${LATEST}\"|" "$toml"
+          rm -f "${toml}.bak"
+          git add "$toml"
+        fi
+
+        git commit -m "chore: bump foundationVersion to ${new}"
+        git push --force-with-lease origin "$branch"
+        gh pr create --head "$branch" --base "$base" \
+          --title "chore: bump foundationVersion to ${new}" \
+          --body "Foundation moved from \`${PINNED}\` to \`${LATEST}\`. Review the foundation changelog and platform overrides before merging."

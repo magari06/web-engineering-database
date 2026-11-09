@@ -1,0 +1,188 @@
+/**
+ * Valid JSON primitive types.
+ */
+export type JsonPrimitive = string | number | boolean | null;
+
+/**
+ * The form value of a submission. This is usually constructed from a FormData or URLSearchParams.
+ * It may contains JSON primitives if the value is updated based on a form intent.
+ */
+export type FormValue<
+	Type extends JsonPrimitive | FormDataEntryValue =
+		| JsonPrimitive
+		| FormDataEntryValue,
+> = Type | FormValue<Type | null>[] | { [key: string]: FormValue<Type> };
+
+/**
+ * Form error object that contains both form errors and field errors.
+ */
+export type FormError<ErrorShape = string[]> = {
+	/**
+	 * The form-level error payload.
+	 * Set to `null` when there is no form-level error.
+	 */
+	formErrors: ErrorShape | null;
+	/**
+	 * Field-level error payloads mapped by field name.
+	 * Use `null` to explicitly clear a field error.
+	 */
+	fieldErrors: Record<string, ErrorShape | null>;
+};
+
+/**
+ * A widened version of `StandardSchemaV1.Issue`.
+ *
+ * The `path` elements and `PropertyKey` fields are loosened to `unknown`
+ * to stay compatible with Valibot's native issue type.
+ */
+export type StandardSchemaIssue = {
+	readonly message: string;
+	readonly path?: ReadonlyArray<unknown | { key: unknown }> | undefined;
+};
+
+export type StandardSchemaError = Partial<Record<keyof FormError, never>> & {
+	issues: ReadonlyArray<StandardSchemaIssue>;
+};
+
+export type CustomError<ErrorShape> = Partial<FormError<ErrorShape>> & {
+	issues?: never;
+};
+
+/**
+ * Structured data parsed from a form submission.
+ */
+export type Submission<
+	ValueType extends JsonPrimitive | FormDataEntryValue =
+		| JsonPrimitive
+		| FormDataEntryValue,
+> = {
+	/**
+	 * The submitted values mapped by field name.
+	 * Supports nested names like `user.email` or indexed names like `items[0].id`.
+	 *
+	 * **Example:**
+	 * ```json
+	 * {
+	 *   "username": "johndoe",
+	 *   "address": {
+	 *     "street": "123 Main St",
+	 *     "city": "Anytown"
+	 *   },
+	 *   "items": [
+	 *     { "name": "item1", "quantity": "2" },
+	 *     { "name": "item2", "quantity": "5" }
+	 *   ]
+	 * }
+	 * ```
+	 */
+	payload: Record<string, FormValue<ValueType>>;
+	/**
+	 * The list of field names present in the FormData or URLSearchParams.
+	 */
+	fields: string[];
+	/**
+	 * The submission intent, usually set by the name/value of the button that triggered the submission.
+	 */
+	intent: string | null;
+};
+
+/**
+ * The result of a submission.
+ */
+export type SubmissionResult<
+	ErrorShape = string[],
+	ValueType extends JsonPrimitive | FormDataEntryValue =
+		| JsonPrimitive
+		| FormDataEntryValue,
+> = {
+	/**
+	 * The original submission data.
+	 */
+	submission: Submission<ValueType>;
+	/**
+	 * The target value of the submission. Defined only when the target value is different from the submitted value.
+	 */
+	targetValue?: Record<string, FormValue<ValueType>> | undefined;
+	/**
+	 * Validation errors for `targetValue` when present, otherwise for the original payload.
+	 */
+	error?: FormError<ErrorShape> | null | undefined;
+	/**
+	 * Indicates whether the form should be reset to its initial state.
+	 */
+	reset?: boolean | undefined;
+};
+
+/** The name of an input field with type information for TypeScript inference. */
+export type FieldName<FieldShape> = string & {
+	'~shape'?: FieldShape;
+};
+
+/**
+ * The input attributes related to form field constraints.
+ *
+ * See https://developer.mozilla.org/en-US/docs/Web/HTML/Constraint_validation
+ */
+export type ValidationAttributes = {
+	required?: boolean | undefined;
+	minLength?: number | undefined;
+	maxLength?: number | undefined;
+	min?: string | number | undefined;
+	max?: string | number | undefined;
+	step?: string | number | undefined;
+	multiple?: boolean | undefined;
+	pattern?: string | undefined;
+	accept?: string | undefined;
+};
+
+/**
+ * A type helper that makes sure the FormError type is serializable.
+ * Used only to strip `File` type from the Form Shape at the moment.
+ */
+export type Serializable<T> = T extends File
+	? undefined
+	: T extends Array<infer U>
+		? Serializable<U>[]
+		: T extends object
+			? { [K in keyof T]: Serializable<T[K]> }
+			: T;
+
+/**
+ * Converts an arbitrary value into a form value.
+ *
+ * This function is used to prepare field values for submission,
+ * ensuring they are compatible with the browser's `FormData` API.
+ */
+export type Serialize = (
+	value: unknown,
+	ctx: {
+		name: string | undefined;
+	},
+) => FormValue<FormDataEntryValue> | null | undefined;
+
+/**
+ * A custom serializer that can override specific values and delegate everything
+ * else back to the default serializer.
+ */
+export type CustomSerialize = (
+	value: unknown,
+	ctx: {
+		name: string | undefined;
+		defaultSerialize: (value: unknown) => ReturnType<Serialize>;
+	},
+) => FormValue<FormDataEntryValue> | null | undefined;
+
+/**
+ * Flatten a discriminated union into a single type with all properties.
+ */
+export type Combine<
+	T,
+	K extends PropertyKey = T extends unknown ? keyof T : never,
+> = T extends unknown ? T & Partial<Record<Exclude<K, keyof T>, never>> : never;
+
+/**
+ * Maps all keys of T (including all keys from discriminated unions) to unknown.
+ */
+export type UnknownObject<T> = [T] extends [Record<string, any>]
+	? { [K in keyof Combine<T>]-?: unknown }
+	: never;

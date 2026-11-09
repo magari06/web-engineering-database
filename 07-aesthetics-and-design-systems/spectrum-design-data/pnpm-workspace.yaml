@@ -1,0 +1,6 @@
+packages:
+  - "packages/*"
+  - "docs/*"
+  - "tools/*"
+  - "sdk/tui"
+  - "sdk/wasm"

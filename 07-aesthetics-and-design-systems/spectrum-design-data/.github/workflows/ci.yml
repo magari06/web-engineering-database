@@ -1,0 +1,131 @@
+name: CI
+on: pull_request
+
+permissions:
+  contents: read
+  pull-requests: write
+
+# Cancel superseded runs on the same branch — avoids running stale CI when
+# commits are pushed in quick succession.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Pure-Node checks — no Rust compilation. Runs tool unit tests and
+  # package-level Node tasks that have no sdk:* dependency. Runs in parallel
+  # with the rust job so JS-only PRs get fast feedback without waiting for
+  # the full Rust + wasm build.
+  #
+  # Target lists live in .github/ci-targets.json (single source of truth).
+  # Edit that file to add/remove targets; the ci-targets-guard job enforces
+  # that every runInCI moon task is accounted for.
+  node:
+    name: Node
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Blobless partial clone: fetches full commit graph but skips
+          # historical file blobs (fetched on demand). Keeps moon's affected
+          # detection intact while reducing checkout time on large histories.
+          filter: blob:none
+      # Pre-install Rust before moon/proto runs. .moon/toolchains.yml configures
+      # rust@1.88.0 globally, so proto installs it at task-graph setup time even
+      # for Node-only CI runs. Without this step, proto uses rustup to install
+      # the toolchain but then fails to locate cargo at the expected path — a
+      # proto/rustup interaction bug. Pre-installing via dtolnay/rust-toolchain
+      # ensures proto finds cargo already present and skips its own install.
+      - uses: dtolnay/rust-toolchain@1.88.0
+      # sdk/.cargo/config.toml forces the lld linker for all Linux builds, and
+      # some node-list moon tasks transitively depend on sdk:build — install
+      # it here too, mirroring the Rust job below.
+      - name: Install lld
+        run: sudo apt-get update && sudo apt-get install -y lld
+      - uses: moonrepo/setup-toolchain@v0
+        with:
+          auto-install: true
+      - name: Cache pnpm store
+        uses: ./.github/actions/cache-pnpm-store
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Run Node CI tasks
+        run: moon ci $(jq -r '.node[]' .github/ci-targets.json | tr '\n' ' ')
+      - uses: moonrepo/run-report-action@v1
+        if: success() || failure()
+        with:
+          access-token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Rust + wasm checks — compiles the SDK workspace and runs all tasks that
+  # depend on sdk:build (tokens validation, design-data validation) or
+  # sdk-wasm:build. Uses Swatinem/rust-cache to persist the Cargo build cache
+  # across runs, turning cold 455-crate compiles into fast incremental builds.
+  #
+  # Target lists live in .github/ci-targets.json (single source of truth).
+  # Edit that file to add/remove targets; the ci-targets-guard job enforces
+  # that every runInCI moon task is accounted for.
+  rust:
+    name: Rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          filter: blob:none
+      # Install Rust 1.88.0 + wasm32 target + clippy + rustfmt before moon/proto runs,
+      # so proto uses the system-installed toolchain rather than re-downloading.
+      # Aligned with sdk/rust-toolchain.toml and .moon/toolchains.yml.
+      - uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy, rustfmt
+      # lld links noticeably faster than the default bfd linker, applied via
+      # sdk/.cargo/config.toml (scoped to x86_64-unknown-linux-gnu only).
+      - name: Install lld
+        run: sudo apt-get update && sudo apt-get install -y lld
+      # cargo-nextest runs sdk:test — schedules all tests across one pool
+      # instead of one binary at a time (~27 integration-test binaries).
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.114
+      # Persist the Cargo build cache (sdk/target/) across PR runs.
+      # On a warm hit this turns a full 455-crate recompile into an incremental
+      # build — the single biggest CI speedup in this repo.
+      - name: Cache Cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "sdk -> sdk/target"
+      # wasm-pack is pinned in .prototools and installed by setup-toolchain below.
+      - uses: moonrepo/setup-toolchain@v0
+        with:
+          auto-install: true
+      - name: Cache pnpm store
+        uses: ./.github/actions/cache-pnpm-store
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Run Rust CI tasks
+        run: moon ci $(jq -r '.rust[]' .github/ci-targets.json | tr '\n' ' ')
+      - uses: moonrepo/run-report-action@v1
+        if: success() || failure()
+        with:
+          access-token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Validates that every moon task with runInCI enabled is listed in
+  # .github/ci-targets.json (node or rust) or explicitly excluded.
+  # Fails if a new task is added to the workspace without being categorized,
+  # preventing silent coverage gaps.
+  ci-targets-guard:
+    name: CI Targets Guard
+    runs-on: ubuntu-latest
+    steps:
+      # Shallow checkout is sufficient — this job only reads static config files
+      # (moon.yml, .github/ci-targets.json) to verify task coverage.
+      - uses: actions/checkout@v4
+      - uses: moonrepo/setup-toolchain@v0
+        with:
+          auto-install: true
+      - name: Cache pnpm store
+        uses: ./.github/actions/cache-pnpm-store
+      - name: Check CI target coverage
+        run: node .github/scripts/check-ci-coverage.mjs

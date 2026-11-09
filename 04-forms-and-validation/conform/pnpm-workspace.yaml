@@ -1,0 +1,26 @@
+packages:
+  - 'packages/*'
+  - 'examples/*'
+  - 'guide'
+  - 'playground'
+
+minimumReleaseAge: 2880
+
+allowBuilds:
+  deasync: true
+  esbuild: true
+  msw: false
+  sharp: true
+  workerd: true
+
+linkWorkspacePackages: true
+
+hoistPattern:
+  - '*'
+  - '!@types/react'
+  - '!@types/react-dom'
+  - '!react'
+  - '!react-dom'
+
+syncInjectedDepsAfterScripts:
+  - build

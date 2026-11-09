@@ -1,0 +1,32 @@
+{
+  "name": "@adobe/design-system-registry",
+  "version": "5.0.55",
+  "description": "DEPRECATED — registry data and API have moved to @adobe/spectrum-design-data. This package is a thin compatibility shim.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/adobe/spectrum-design-data.git",
+    "directory": "packages/design-system-registry"
+  },
+  "author": "Garth Braithwaite <garthdb@gmail.com> (https://garthdb.com/)",
+  "bugs": {
+    "url": "https://github.com/adobe/spectrum-design-data/issues"
+  },
+  "publishConfig": {
+    "provenance": true
+  },
+  "homepage": "https://github.com/adobe/spectrum-design-data/tree/main/packages/design-system-registry#readme",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20.12.0",
+    "pnpm": ">=10.17.1"
+  },
+  "packageManager": "pnpm@10.17.1",
+  "dependencies": {
+    "@adobe/spectrum-design-data": "workspace:*"
+  }
+}

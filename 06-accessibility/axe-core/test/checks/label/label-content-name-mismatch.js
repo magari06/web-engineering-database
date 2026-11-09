@@ -1,0 +1,518 @@
+describe('label-content-name-mismatch tests', () => {
+  const html = axe.testUtils.html;
+
+  const queryFixture = axe.testUtils.queryFixture;
+  const queryShadowFixture = axe.testUtils.queryShadowFixture;
+  const checkEvaluate = axe.testUtils.getCheckEvaluate(
+    'label-content-name-mismatch'
+  );
+  const options = undefined;
+  const checkContext = new axe.testUtils.MockCheckContext();
+  const valueTextOptions = {
+    valueTextRoles: [
+      'switch',
+      'checkbox',
+      'radio',
+      'menuitemcheckbox',
+      'menuitemradio'
+    ]
+  };
+
+  const fontApiSupport = !!document.fonts;
+
+  afterEach(() => {
+    checkContext.reset();
+  });
+
+  before(done => {
+    if (!fontApiSupport) {
+      done();
+    }
+
+    const materialFont = new FontFace(
+      'Material Icons',
+      'url(https://fonts.gstatic.com/s/materialicons/v48/flUhRq6tzZclQEJ-Vdg-IuiaDsNcIhQ8tQ.woff2)'
+    );
+    materialFont.load().then(() => {
+      document.fonts.add(materialFont);
+      done();
+    });
+  });
+
+  it('returns true when visible text and accessible name (`aria-label`) matches (text sanitized)', () => {
+    const vNode = queryFixture(
+      '<div id="target" role="link" aria-label="next page &nbsp ">next page</div>'
+    );
+    const actual = checkEvaluate(vNode.actualNode, options, vNode);
+    assert.isTrue(actual);
+  });
+
+  it('returns true when visible text and accessible name (`aria-label`) matches (character insensitive)', () => {
+    const vNode = queryFixture(
+      '<div id="target" role="link" aria-label="Next Page">next pAge</div>'
+    );
+    const actual = checkEvaluate(vNode.actualNode, options, vNode);
+    assert.isTrue(actual);
+  });
+
+  it('returns true when visible text and accessible name (`aria-labelledby`) matches (character insensitive & text sanitized)', () => {
+    const vNode = queryFixture(html`
+      <div id="target" aria-labelledby="yourLabel">UNTIL THE VeRy EnD</div>
+      <div id="yourLabel">uNtIl the very end &nbsp</div>
+    `);
+    const actual = checkEvaluate(vNode.actualNode, options, vNode);
+    assert.isTrue(actual);
+  });
+
+  it('returns true when visible text is contained in the accessible name', () => {
+    const vNode = queryFixture(
+      '<button id="target" name="link" aria-label="Next Page in the list">Next Page</button>'
+    );
+    const actual = checkEvaluate(vNode.actualNode, options, vNode);
+    assert.isTrue(actual);
+  });
+
+  it('returns false when visible text doesn’t match accessible name', () => {
+    const vNode = queryFixture(
+      '<div id="target" role="link" aria-label="OK">Next</div>'
+    );
+    const actual = checkEvaluate(vNode.actualNode, options, vNode);
+    assert.isFalse(actual);
+  });
+
+  it('returns false when not all of visible text is included in accessible name', () => {
+    const vNode = queryFixture(
+      '<button id="target" name="link" aria-label="the full">The full label</button>'
+    );
+    const actual = checkEvaluate(vNode.actualNode, options, vNode);
+    assert.isFalse(actual);
+  });
+
+  it('returns false when element has non-matching accessible name (`aria-labelledby`) and text content', () => {
+    const vNode = queryFixture(html`
+      <div role="button" id="target" aria-labelledby="foo">some content</div>
+      <div id="foo">123</div>
+    `);
+    const actual = checkEvaluate(vNode.actualNode, options, vNode);
+    assert.isFalse(actual);
+  });
+
+  it('returns true when visible text excluding emoji is part of accessible name', () => {
+    const vNode = queryFixture(
+      '<button id="target" aria-label="I would like a burger">I would like a 🍔 </button>'
+    );
+    const actual = checkEvaluate(vNode.actualNode, options, vNode);
+    assert.isTrue(actual);
+  });
+
+  it('returns true when visible text excluding punctuations/ symbols is part of accessible name', () => {
+    const vNode = queryFixture(
+      '<button id="target" aria-label="next page">next page &gt;&gt;</button>'
+    );
+    const actual = checkEvaluate(vNode.actualNode, options, vNode);
+    assert.isTrue(actual);
+  });
+
+  (fontApiSupport ? it : it.skip)(
+    'returns true when visible text excluding ligature icon is part of accessible name',
+    () => {
+      const vNode = queryFixture(
+        '<button id="target" aria-label="next page">next page <span style="font-family: \'Material Icons\'">delete</span></button>'
+      );
+      const actual = checkEvaluate(vNode.actualNode, options, vNode);
+      assert.isTrue(actual);
+    }
+  );
+
+  it('returns true when visible text excluding private use unicode is part of accessible name', () => {
+    const vNode = queryFixture(
+      '<button id="target" aria-label="Favorites"> Favorites</button>'
+    );
+    const actual = checkEvaluate(vNode.actualNode, options, vNode);
+    assert.isTrue(actual);
+  });
+
+  it('returns undefined (needs review) when visible text name is only an emoji', () => {
+    const vNode = queryFixture(
+      '<button id="target" aria-label="comet">☄️</button>'
+    );
+    const actual = checkEvaluate(vNode.actualNode, options, vNode);
+    assert.isUndefined(actual);
+  });
+
+  it('returns undefined (needs review) when accessible name is an emoji', () => {
+    const vNode = queryFixture(
+      '<button id="target" aria-label="☄️">shooting star</button>'
+    );
+    const actual = checkEvaluate(vNode.actualNode, options, vNode);
+    assert.isUndefined(actual);
+  });
+
+  it('returns undefined (needs review) for visible text is single characters (punctuation) used as icon', () => {
+    const vNode = queryFixture(
+      '<button id="target" aria-label="help">?</button>'
+    );
+    const actual = checkEvaluate(vNode.actualNode, options, vNode);
+    assert.isUndefined(actual);
+  });
+
+  it('returns undefined (needs review) for unicode as accessible name and text content', () => {
+    const vNode = queryFixture(
+      '<button id="target" aria-label="&#x1F354">&#x1F354</button>'
+    );
+    const actual = checkEvaluate(vNode.actualNode, options, vNode);
+    assert.isUndefined(actual);
+  });
+
+  it('returns undefined (needs review) for unicode text content', () => {
+    const vNode = queryFixture(
+      '<button id="target" aria-label="close">&#10060;</button>'
+    );
+    const actual = checkEvaluate(vNode.actualNode, options, vNode);
+    assert.isUndefined(actual);
+  });
+
+  it('returns undefined (needs review) when punctuation is used as text content', () => {
+    const vNode = queryFixture(
+      '<button id="target" aria-label="wink">;)</button>'
+    );
+    const actual = checkEvaluate(vNode.actualNode, options, vNode);
+    assert.isUndefined(actual);
+  });
+
+  it('returns true when normal text content which is punctuated', () => {
+    const vNode = queryFixture(
+      '<button id="target" aria-label="I like football but I prefer cycling more">I like football, but I prefer cycling more.</button>'
+    );
+    const actual = checkEvaluate(vNode.actualNode, options, vNode);
+    assert.isTrue(actual);
+  });
+
+  it('returns false when normal puntuated text content is not contained in accessible name is punctuated', () => {
+    const vNode = queryFixture(
+      '<button id="target" aria-label="I like football">I like cycling more!!!</button>'
+    );
+    const actual = checkEvaluate(vNode.actualNode, options, vNode);
+    assert.isFalse(actual);
+  });
+
+  it('returns true when text contains <br/>', () => {
+    const vNode = queryFixture(
+      '<button id="target" aria-label="button label">button<br>label</button>'
+    );
+    const actual = checkEvaluate(vNode.actualNode, options, vNode);
+    assert.isTrue(actual);
+  });
+
+  it('treats a lone newline in the visible text as a word separator', () => {
+    const vNode = queryFixture(
+      '<button id="target" aria-label="save changes">save\nchanges</button>'
+    );
+    const actual = checkEvaluate(vNode.actualNode, options, vNode);
+    assert.isTrue(actual);
+  });
+
+  it('returns true when aria-label and visible text match even though there is an image with alt text', function () {
+    var vNode = queryFixture(
+      '<button id="target" aria-label="button label"><img alt="button icon" src="button.png" />button label</button>'
+    );
+    var actual = checkEvaluate(vNode.actualNode, options, vNode);
+    assert.isTrue(actual);
+  });
+
+  it('returns false when aria-label and visible text do not match even though there is an image with alt text', function () {
+    var vNode = queryFixture(
+      '<button id="target" aria-label="button label"><img alt="button icon" src="button.png" />this is a button label</button>'
+    );
+    var actual = checkEvaluate(vNode.actualNode, options, vNode);
+    assert.isFalse(actual);
+  });
+
+  (fontApiSupport ? it : it.skip)(
+    'returns true when aria-label and visible text match even though there is a ligature icon',
+    function () {
+      var vNode = queryFixture(
+        '<button id="target" aria-label="button label"><span style="font-family: \'Material Icons\'">delete</span>button label</button>'
+      );
+      var actual = checkEvaluate(vNode.actualNode, options, vNode);
+      assert.isTrue(actual);
+    }
+  );
+
+  (fontApiSupport ? it : it.skip)(
+    'returns false when aria-label and visible text do not match even though there is a ligature icon',
+    function () {
+      var vNode = queryFixture(
+        '<button id="target" aria-label="button label"><span style="font-family: \'Material Icons\'">delete</span>this is a button label</button>'
+      );
+      var actual = checkEvaluate(vNode.actualNode, options, vNode);
+      assert.isFalse(actual);
+    }
+  );
+
+  it('returns false when the visible words are not a contiguous run within the accessible name', () => {
+    const vNode = queryFixture(
+      '<button id="target" aria-label="the big red button">big button</button>'
+    );
+    const actual = checkEvaluate(vNode.actualNode, options, vNode);
+    assert.isFalse(actual);
+  });
+
+  it('returns true when the visible words are a contiguous run within the accessible name', () => {
+    const vNode = queryFixture(
+      '<button id="target" aria-label="go to next page now">next page</button>'
+    );
+    const actual = checkEvaluate(vNode.actualNode, options, vNode);
+    assert.isTrue(actual);
+  });
+
+  it('treats a soft hyphen as a word separator', () => {
+    const vNode = queryFixture(
+      '<a id="target" href="#" aria-label="nonstandard">non\u00ADstandard</a>'
+    );
+    const actual = checkEvaluate(vNode.actualNode, options, vNode);
+    assert.isFalse(actual);
+  });
+
+  [
+    ['a hyphen', 'non-standard', 'nonstandard'],
+    ['an apostrophe', 'its book', "it's"],
+    ['periods', 'usa', 'u.s.a'],
+    ['an en dash', 'email', 'e–mail']
+  ].forEach(([label, name, content]) => {
+    it(`returns false when the words differ by ${label}`, () => {
+      const vNode = queryFixture(
+        `<a id="target" href="#" aria-label="${name}">${content}</a>`
+      );
+      const actual = checkEvaluate(vNode.actualNode, options, vNode);
+      assert.isFalse(actual);
+    });
+  });
+
+  it('slits words in different languages if available', () => {
+    const vNode = queryFixture(
+      `<a id="target" href="#" aria-label="サイト内を検索">検索</a>`
+    );
+    const actual = checkEvaluate(vNode.actualNode, options, vNode);
+    assert.isTrue(actual);
+  });
+
+  it('matches the visible label against the accessible name across an open shadow DOM boundary', () => {
+    const vNode = queryShadowFixture(
+      '<button id="target" aria-label="save changes"><span id="shadow"></span> changes</button>',
+      'save'
+    );
+    const actual = checkEvaluate(vNode.actualNode, options, vNode);
+    assert.isTrue(actual);
+  });
+  describe('parenthesised content', () => {
+    it('returns true when the visible label adds a parenthesised suffix', () => {
+      const vNode = queryFixture(
+        '<button id="target" aria-label="search by date">Search by date (YYYY-MM-DD)</button>'
+      );
+      const actual = checkEvaluate(vNode.actualNode, options, vNode);
+      assert.isTrue(actual);
+    });
+
+    it('returns true when the accessible name adds a parenthesised suffix', () => {
+      const vNode = queryFixture(
+        '<button id="target" aria-label="download (pdf)">Download</button>'
+      );
+      const actual = checkEvaluate(vNode.actualNode, options, vNode);
+      assert.isTrue(actual);
+    });
+
+    it('removes full-width parentheses and their content', () => {
+      const vNode = queryFixture(
+        '<button id="target" aria-label="download">Download（PDF）</button>'
+      );
+      const actual = checkEvaluate(vNode.actualNode, options, vNode);
+      assert.isTrue(actual);
+    });
+
+    it('removes characters that decompose to parenthesised content', () => {
+      const vNode = queryFixture(
+        '<button id="target" aria-label="download">⑴ Download</button>'
+      );
+      const actual = checkEvaluate(vNode.actualNode, options, vNode);
+      assert.isTrue(actual);
+    });
+
+    it('removes nested parentheses', () => {
+      const vNode = queryFixture(
+        '<button id="target" aria-label="open report">Open report (latest (2026) draft)</button>'
+      );
+      const actual = checkEvaluate(vNode.actualNode, options, vNode);
+      assert.isTrue(actual);
+    });
+
+    it('returns true when the visible label is entirely parenthesised', () => {
+      const vNode = queryFixture(
+        '<a id="target" href="#" aria-label="download (pdf)">(PDF)</a>'
+      );
+      const actual = checkEvaluate(vNode.actualNode, options, vNode);
+      assert.isTrue(actual);
+    });
+
+    it('returns false when the words outside the parentheses still differ', () => {
+      const vNode = queryFixture(
+        '<button id="target" aria-label="search by date">Filter by date (YYYY-MM-DD)</button>'
+      );
+      const actual = checkEvaluate(vNode.actualNode, options, vNode);
+      assert.isFalse(actual);
+    });
+
+    it('ignores an unmatched parenthesis', () => {
+      const vNode = queryFixture(
+        '<button id="target" aria-label="save changes">Save changes (</button>'
+      );
+      const actual = checkEvaluate(vNode.actualNode, options, vNode);
+      assert.isTrue(actual);
+    });
+  });
+  describe('language-independent normalization', () => {
+    it('ignores CJK and full-width punctuation', () => {
+      const vNode = queryFixture(
+        '<a id="target" href="#" aria-label="範例公司官網，另開新視窗">範例公司官網（另開新視窗）</a>'
+      );
+      const actual = checkEvaluate(vNode.actualNode, options, vNode);
+      assert.isTrue(actual);
+    });
+
+    it('ignores an ideographic full stop', () => {
+      const vNode = queryFixture(
+        '<button id="target" aria-label="新しいウィンドウで開きます">新しいウィンドウで開きます。</button>'
+      );
+      const actual = checkEvaluate(vNode.actualNode, options, vNode);
+      assert.isTrue(actual);
+    });
+
+    it('matches full-width letters and digits to their ASCII forms', () => {
+      const vNode = queryFixture(
+        '<button id="target" aria-label="model abc123">Ｍｏｄｅｌ ＡＢＣ１２３</button>'
+      );
+      const actual = checkEvaluate(vNode.actualNode, options, vNode);
+      assert.isTrue(actual);
+    });
+
+    it('matches precomposed and decomposed accented letters', () => {
+      const vNode = queryFixture(
+        '<button id="target" aria-label="cafe\u0301 menu">Café</button>'
+      );
+      const actual = checkEvaluate(vNode.actualNode, options, vNode);
+      assert.isTrue(actual);
+    });
+
+    ['¿Hola?', '¡Hola!', '«Hola»', 'Hola°', 'Hola×'].forEach(content => {
+      it(`ignores the punctuation or symbols in ${content}`, () => {
+        const vNode = queryFixture(
+          `<button id="target" aria-label="hola">${content}</button>`
+        );
+        const actual = checkEvaluate(vNode.actualNode, options, vNode);
+        assert.isTrue(actual);
+      });
+    });
+
+    it('keeps numbers that are outside the basic digits', () => {
+      const vNode = queryFixture(
+        '<button id="target" aria-label="items">⓫ items</button>'
+      );
+      const actual = checkEvaluate(vNode.actualNode, options, vNode);
+      assert.isFalse(actual);
+    });
+
+    it('treats a keycap emoji as non-text content', () => {
+      const vNode = queryFixture(
+        '<button id="target" aria-label="next">1\uFE0F\u20E3 next</button>'
+      );
+      const actual = checkEvaluate(vNode.actualNode, options, vNode);
+      assert.isTrue(actual);
+    });
+
+    it('treats a combining mark as a word separator', () => {
+      const vNode = queryFixture(
+        '<button id="target" aria-label="naïve">ve</button>'
+      );
+      const actual = checkEvaluate(vNode.actualNode, options, vNode);
+      assert.isTrue(actual);
+    });
+  });
+
+  describe('options.valueTextRoles', () => {
+    valueTextOptions.valueTextRoles.forEach(role => {
+      it(`returns undefined when a ${role} has visible text outside its accessible name`, () => {
+        const vNode = queryFixture(
+          `<div id="labelFor${role}">Notifications</div>` +
+            `<div id="target" role="${role}" aria-labelledby="labelFor${role}">` +
+            '<span>[On]</span><span>Off</span></div>'
+        );
+        const actual = checkEvaluate.call(
+          checkContext,
+          vNode.actualNode,
+          valueTextOptions,
+          vNode
+        );
+        assert.isUndefined(actual);
+        assert.deepEqual(checkContext._data, { messageKey: 'valueText' });
+      });
+    });
+
+    it('returns true when a switch has its visible text inside the accessible name', () => {
+      const vNode = queryFixture(
+        '<div id="target" role="switch" aria-label="notifications on">notifications</div>'
+      );
+      const actual = checkEvaluate.call(
+        checkContext,
+        vNode.actualNode,
+        valueTextOptions,
+        vNode
+      );
+      assert.isTrue(actual);
+      assert.isNull(checkContext._data);
+    });
+
+    it('returns undefined when a switch has shadow DOM text outside its accessible name', () => {
+      const vNode = queryShadowFixture(
+        '<div id="target" role="switch" aria-label="notifications">' +
+          '<span id="shadow"></span></div>',
+        '<span>[On]</span><span>Off</span>'
+      );
+      const actual = checkEvaluate.call(
+        checkContext,
+        vNode.actualNode,
+        valueTextOptions,
+        vNode
+      );
+      assert.isUndefined(actual);
+      assert.deepEqual(checkContext._data, { messageKey: 'valueText' });
+    });
+
+    it('returns false for a role outside the configured list', () => {
+      const vNode = queryFixture(
+        '<button id="target" aria-label="notifications">[On] Off</button>'
+      );
+      const actual = checkEvaluate.call(
+        checkContext,
+        vNode.actualNode,
+        valueTextOptions,
+        vNode
+      );
+      assert.isFalse(actual);
+    });
+
+    it('returns false for a switch when the option is empty', () => {
+      const vNode = queryFixture(
+        '<div id="labelForEmpty">Notifications</div>' +
+          '<div id="target" role="switch" aria-labelledby="labelForEmpty">' +
+          '<span>[On]</span><span>Off</span></div>'
+      );
+      const actual = checkEvaluate.call(
+        checkContext,
+        vNode.actualNode,
+        { valueTextRoles: [] },
+        vNode
+      );
+      assert.isFalse(actual);
+    });
+  });
+});

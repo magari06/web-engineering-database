@@ -1,0 +1,37 @@
+$schema: "https://moonrepo.dev/schemas/project.json"
+
+project:
+  name: "s2-docs-mcp"
+  description: "MCP server for S2 documentation"
+
+tasks:
+  test:
+    command: [pnpm, ava]
+    inputs:
+      - "skills/**/*"
+      - "test/**/*.js"
+      - "ava.config.js"
+      - "package.json"
+
+  version:
+    command: node
+    args:
+      - "$workspaceRoot/scripts/sync-skill-version.mjs"
+      - "skills/s2-docs/SKILL.md"
+    inputs:
+      - "package.json"
+    outputs:
+      - "skills/s2-docs/SKILL.md"
+
+  build:
+    command: 'echo "No build required for MCP server"'
+
+  bundle:
+    command:
+      - node
+      - tasks/bundleDocs.js
+    inputs:
+      - "tasks/bundleDocs.js"
+      - "/packages/design-data/components/*.json"
+    outputs:
+      - "data/"

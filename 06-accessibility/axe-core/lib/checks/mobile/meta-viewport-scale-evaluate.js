@@ -1,0 +1,60 @@
+const USER_SCALABLE_ALLOWED = ['yes', 'device-width', 'device-height'];
+const MAXIMUM_SCALE_ALLOWED = ['device-width', 'device-height'];
+
+export default function metaViewportScaleEvaluate(node, options, virtualNode) {
+  const { scaleMinimum = 2, lowerBound = false } = options || {};
+
+  const content = virtualNode.attr('content') || '';
+  if (!content) {
+    return true;
+  }
+
+  const items = content.toLowerCase().split(/[;,]/);
+  for (const item of items) {
+    const [key, value] = item.split('=').map(part => part.trim());
+
+    if (!key || !value) {
+      continue;
+    }
+
+    const floatValue = parseFloat(value);
+
+    if (key === 'user-scalable') {
+      // the large-page sibling rule (lowerBound set) only checks maximum-scale
+      if (lowerBound) {
+        continue;
+      }
+
+      const invalidString =
+        isNaN(floatValue) && !USER_SCALABLE_ALLOWED.includes(value);
+      const invalidNumber = floatValue > -1 && floatValue < 1;
+
+      if (invalidString || invalidNumber) {
+        this.data(`user-scalable=${value}`);
+        return false;
+      }
+    }
+
+    if (key === 'maximum-scale') {
+      // negative values are fine
+      if (floatValue < 0) {
+        continue;
+      }
+
+      const invalidString =
+        isNaN(floatValue) && !MAXIMUM_SCALE_ALLOWED.includes(value);
+
+      // don't double report the maximum-scale on the large-page sibling rule
+      if (lowerBound && (invalidString || floatValue < lowerBound)) {
+        continue;
+      }
+
+      if (invalidString || floatValue < scaleMinimum) {
+        this.data(`maximum-scale=${value}`);
+        return false;
+      }
+    }
+  }
+
+  return true;
+}

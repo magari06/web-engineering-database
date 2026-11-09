@@ -1,0 +1,424 @@
+// Copyright 2026 Adobe. All rights reserved.
+// This file is licensed to you under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License. You may obtain a copy
+// of the License at http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under
+// the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+// OF ANY KIND, either express or implied. See the License for the specific language
+// governing permissions and limitations under the License.
+
+//! Structural (Layer 1) and relational (Layer 2) validation.
+
+pub mod dataset_structure;
+pub mod relational;
+pub mod rule;
+pub mod rules;
+pub mod structural;
+
+use std::collections::HashSet;
+use std::path::Path;
+
+use crate::graph::TokenGraph;
+use crate::report::{Severity, ValidationReport};
+use crate::schema::SchemaRegistry;
+use crate::CoreError;
+
+/// Core validation pipeline is available (schemas + engine compile).
+pub fn engine_ready() -> bool {
+    true
+}
+
+/// Run structural validation then relational rules on legacy token JSON under `data_path`.
+pub fn validate_all(
+    data_path: &Path,
+    schema_registry: &SchemaRegistry,
+) -> Result<ValidationReport, CoreError> {
+    validate_all_with_exceptions(data_path, schema_registry, &HashSet::new())
+}
+
+/// Run structural + relational validation with a naming-exceptions allowlist.
+///
+/// `mode_sets_path` is an optional directory containing spec-format mode set
+/// declaration JSON files (e.g. `packages/design-data/mode-sets/`). When
+/// provided, mode sets are loaded and attached to the token graph so that
+/// mode-set-aware rules (SPEC-005, SPEC-008) can fire correctly.
+pub fn validate_all_with_exceptions(
+    data_path: &Path,
+    schema_registry: &SchemaRegistry,
+    naming_exceptions: &HashSet<String>,
+) -> Result<ValidationReport, CoreError> {
+    validate_all_with_options(data_path, schema_registry, naming_exceptions, None, None)
+}
+
+/// Full validation with all options.
+///
+/// `mode_sets_path` — optional directory of spec-format mode set JSON files.
+/// `components_path` — optional directory of spec-format component JSON files;
+/// when provided, SPEC-028 and SPEC-029 also check components and anatomy parts.
+/// `names_dir` — optional directory of sidecar name maps (mirrors the token
+/// source layout); when provided, name objects are merged into `record.raw`
+/// at ingest so relational rules see `name` as if it were inline.
+///
+/// When `data_path` is a directory, a `manifest.json` sibling is loaded
+/// automatically and passed to manifest-aware rules (e.g. SPEC-039).
+/// When `data_path` is a single file, no manifest is loaded and SPEC-039
+/// is a silent no-op even if a sibling `manifest.json` exists.
+pub fn validate_all_with_options(
+    data_path: &Path,
+    schema_registry: &SchemaRegistry,
+    naming_exceptions: &HashSet<String>,
+    mode_sets_path: Option<&Path>,
+    components_path: Option<&Path>,
+) -> Result<ValidationReport, CoreError> {
+    validate_all_with_options_and_names(
+        data_path,
+        schema_registry,
+        naming_exceptions,
+        mode_sets_path,
+        components_path,
+        None,
+    )
+}
+
+/// Full validation with all options including sidecar names directory.
+pub fn validate_all_with_options_and_names(
+    data_path: &Path,
+    schema_registry: &SchemaRegistry,
+    naming_exceptions: &HashSet<String>,
+    mode_sets_path: Option<&Path>,
+    components_path: Option<&Path>,
+    names_dir: Option<&Path>,
+) -> Result<ValidationReport, CoreError> {
+    validate_all_with_full_options(
+        data_path,
+        schema_registry,
+        naming_exceptions,
+        mode_sets_path,
+        components_path,
+        names_dir,
+        None,
+        None,
+        None,
+        None,
+    )
+}
+
+/// Full validation with all options including a guidelines catalog directory.
+///
+/// `guidelines_path` — optional directory of spec-format guideline JSON files;
+/// when provided, SPEC-045 and SPEC-046 also check guidelines.
+/// `relationships_path` — optional directory of spec-format Component/Token
+/// Relationship (CTR) JSON files; when provided, SPEC-051..057 also check
+/// relationships.
+/// `visuals_path` — optional directory of component visual recipe JSON files;
+/// when provided, SPEC-060..063 check each recipe against component and
+/// relationship data.
+/// `icons_path` — optional `icons/` catalog; when provided with recipes, SPEC-085 and
+/// SPEC-086 check the icons that recipe parts reference.
+#[allow(clippy::too_many_arguments)]
+pub fn validate_all_with_full_options(
+    data_path: &Path,
+    schema_registry: &SchemaRegistry,
+    naming_exceptions: &HashSet<String>,
+    mode_sets_path: Option<&Path>,
+    components_path: Option<&Path>,
+    names_dir: Option<&Path>,
+    guidelines_path: Option<&Path>,
+    relationships_path: Option<&Path>,
+    visuals_path: Option<&Path>,
+    icons_path: Option<&Path>,
+) -> Result<ValidationReport, CoreError> {
+    validate_all_with_platform(
+        data_path,
+        schema_registry,
+        naming_exceptions,
+        mode_sets_path,
+        components_path,
+        names_dir,
+        guidelines_path,
+        relationships_path,
+        visuals_path,
+        icons_path,
+        None,
+    )
+}
+
+/// [`validate_all_with_full_options`] with a platform manifest document. It replaces the
+/// `manifest.json` sibling of `data_path`, and SPEC-076 checks that every recipe binding
+/// resolves under it.
+#[allow(clippy::too_many_arguments)]
+pub fn validate_all_with_platform(
+    data_path: &Path,
+    schema_registry: &SchemaRegistry,
+    naming_exceptions: &HashSet<String>,
+    mode_sets_path: Option<&Path>,
+    components_path: Option<&Path>,
+    names_dir: Option<&Path>,
+    guidelines_path: Option<&Path>,
+    relationships_path: Option<&Path>,
+    visuals_path: Option<&Path>,
+    icons_path: Option<&Path>,
+    platform_manifest: Option<serde_json::Value>,
+) -> Result<ValidationReport, CoreError> {
+    let mut report = structural::validate_structural(data_path, schema_registry)?;
+    let mut graph = TokenGraph::from_json_dir_with_names_and_catalogs(
+        data_path,
+        names_dir,
+        mode_sets_path,
+        components_path,
+    )?;
+    if let Some(dir) = guidelines_path {
+        if dir.is_dir() {
+            graph.guidelines = TokenGraph::load_spec_guidelines(dir)?;
+        }
+    }
+    if let Some(dir) = relationships_path {
+        if dir.is_dir() {
+            graph.relationships = TokenGraph::load_spec_relationships(dir)?;
+            graph.reindex_relationship_tokens();
+        }
+    }
+    if let Some(dir) = visuals_path {
+        if dir.is_dir() {
+            graph.visuals = TokenGraph::load_spec_visuals(dir)?;
+        }
+    }
+    if let Some(dir) = icons_path {
+        if dir.is_dir() {
+            graph.icons = TokenGraph::load_spec_icons(dir)?;
+        }
+    }
+    // Load manifest.json from the data directory when present.
+    let manifest: Option<serde_json::Value> = if platform_manifest.is_some() {
+        platform_manifest
+    } else if data_path.is_dir() {
+        let mp = data_path.join("manifest.json");
+        if mp.is_file() {
+            std::fs::read_to_string(&mp)
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let effective_exceptions =
+        crate::naming::apply_naming_exceptions_overlay(naming_exceptions, manifest.as_ref());
+    let rel = relational::validate_relational(&graph, &effective_exceptions, manifest.as_ref());
+    report.merge(rel);
+    Ok(report)
+}
+
+/// Validate a whole **dataset** rooted at `dataset_root` (or its `tokens/` dir).
+///
+/// Runs the SPEC-044 structural pre-check ([`dataset_structure::check_dataset_structure`])
+/// **first**, so its diagnostics precede the token/relational rules and a
+/// missing `tokens/` directory produces a clear "structure is incomplete"
+/// message instead of a cascade of per-file errors. When `tokens/` is absent the
+/// graph cannot be built, so the structural diagnostics are returned directly.
+///
+/// `dataset_root` MAY be the dataset root or its `tokens/` directory; it is
+/// normalized via [`dataset_structure::resolve_dataset_root`].
+pub fn validate_dataset(
+    dataset_root: &Path,
+    schema_registry: &SchemaRegistry,
+    naming_exceptions: &HashSet<String>,
+    mode_sets_path: Option<&Path>,
+    components_path: Option<&Path>,
+    names_dir: Option<&Path>,
+) -> Result<ValidationReport, CoreError> {
+    let root = dataset_structure::resolve_dataset_root(dataset_root);
+
+    let mut report = ValidationReport::default();
+    let structure = dataset_structure::check_dataset_structure(&root);
+    let tokens_missing = structure.iter().any(|d| d.severity == Severity::Error);
+    for d in structure {
+        match d.severity {
+            Severity::Error => report.push_error(d),
+            _ => report.push_warning(d),
+        }
+    }
+
+    // Without a `tokens/` directory there is nothing to build a graph from; the
+    // SPEC-044 error already explains the problem, so return early.
+    if tokens_missing {
+        report.recompute_valid();
+        return Ok(report);
+    }
+
+    let tokens_dir = root.join("tokens");
+    let guidelines_dir = root.join("guidelines");
+    let relationships_dir = root.join("relationships");
+    let rest = validate_all_with_full_options(
+        &tokens_dir,
+        schema_registry,
+        naming_exceptions,
+        mode_sets_path,
+        components_path,
+        names_dir,
+        Some(&guidelines_dir),
+        Some(&relationships_dir),
+        Some(&root.join("visuals")),
+        Some(&root.join("icons")),
+    )?;
+    report.merge(rest);
+    Ok(report)
+}
+
+/// Schema-validate every `*.json` file in `<dataset_root>/<dir_name>` against
+/// `schema_path`, appending any violations to `report` as Layer 1 errors.
+///
+/// Returns early (with no error) when the directory does not exist.
+pub fn validate_catalog_dir(
+    report: &mut ValidationReport,
+    dataset_root: &Path,
+    dir_name: &str,
+    schema_path: &Path,
+) -> Result<(), CoreError> {
+    use crate::report::{Diagnostic, Severity};
+
+    let dir = dataset_root.join(dir_name);
+    if !dir.is_dir() {
+        return Ok(());
+    }
+    let mut entries: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("json"))
+        .filter(|p| p.file_name().and_then(|n| n.to_str()) != Some("manifest.json"))
+        .collect();
+    entries.sort();
+
+    for path in entries {
+        let text = std::fs::read_to_string(&path)?;
+        let value: serde_json::Value = match serde_json::from_str(&text) {
+            Ok(v) => v,
+            Err(e) => {
+                report.push_error(Diagnostic {
+                    file: path.clone(),
+                    token: None,
+                    rule_id: None,
+                    severity: Severity::Error,
+                    message: format!("invalid JSON: {e}"),
+                    instance_path: None,
+                    schema_path: None,
+                });
+                continue;
+            }
+        };
+        let errors = SchemaRegistry::validate_value_against_schema_file(&value, schema_path)?;
+        for err in errors {
+            report.push_error(Diagnostic {
+                file: path.clone(),
+                token: None,
+                rule_id: None,
+                severity: Severity::Error,
+                message: format!("{dir_name} schema validation: {err}"),
+                instance_path: None,
+                schema_path: None,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Run Layer 1 schema-shape validation over the standard catalog directories
+/// (`fields`, `components`, `mode-sets`, `registry`, `guidelines`, `icons`) inside `dataset_root`,
+/// using schema files from `spec_schemas_dir`.
+///
+/// Each sub-directory is validated only when its schema file is present in
+/// `spec_schemas_dir`.  Missing sub-directories are silently skipped.
+pub fn validate_catalog_schemas(
+    report: &mut ValidationReport,
+    dataset_root: &Path,
+    spec_schemas_dir: &Path,
+) -> Result<(), CoreError> {
+    for (dir_name, schema_file) in [
+        ("fields", "field.schema.json"),
+        ("components", "component.schema.json"),
+        ("mode-sets", "mode-set.schema.json"),
+        ("registry", "registry-value.json"),
+        ("guidelines", "guideline.schema.json"),
+        ("icons", "icon-set.schema.json"),
+    ] {
+        let schema_path = spec_schemas_dir.join(schema_file);
+        if schema_path.is_file() {
+            validate_catalog_dir(report, dataset_root, dir_name, &schema_path)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::io::Write;
+    use tempfile::TempDir;
+
+    fn write_json(dir: &Path, file: &str, value: serde_json::Value) {
+        let mut f = std::fs::File::create(dir.join(file)).unwrap();
+        write!(f, "{value}").unwrap();
+    }
+
+    /// Inline mode sets co-located in the token tree must survive even when a
+    /// separate mode-sets catalog is also passed (extend, not replace). A broken
+    /// inline mode set (default outside modes) must still trip SPEC-005.
+    #[test]
+    fn inline_mode_set_retained_when_catalog_passed() {
+        let data = TempDir::new().unwrap();
+        let catalog = TempDir::new().unwrap();
+
+        write_json(
+            data.path(),
+            "color.json",
+            json!({
+                "blue-100": {
+                    "$schema": "https://example.com/color.json",
+                    "value": "#00f",
+                    "name": {"property": "background-color"}
+                }
+            }),
+        );
+        // Inline mode set with default NOT in modes → SPEC-005 violation.
+        write_json(
+            data.path(),
+            "broken-mode-set.json",
+            json!({ "name": "scale", "modes": ["medium"], "default": "large" }),
+        );
+        // Valid catalog mode set (default in modes) → no SPEC-005 violation.
+        write_json(
+            catalog.path(),
+            "color-scheme.json",
+            json!({ "name": "colorScheme", "modes": ["light", "dark"], "default": "light" }),
+        );
+
+        let report = validate_all_with_options(
+            data.path(),
+            &SchemaRegistry::new_stub(),
+            &HashSet::new(),
+            Some(catalog.path()),
+            None,
+        )
+        .unwrap();
+
+        let spec005: Vec<_> = report
+            .errors
+            .iter()
+            .chain(report.warnings.iter())
+            .filter(|d| d.rule_id.as_deref() == Some("SPEC-005"))
+            .collect();
+        assert_eq!(
+            spec005.len(),
+            1,
+            "inline mode set must be retained and trip SPEC-005"
+        );
+        assert!(
+            spec005[0].message.contains("scale"),
+            "diagnostic should name the inline 'scale' mode set, got: {}",
+            spec005[0].message
+        );
+    }
+}

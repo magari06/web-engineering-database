@@ -1,0 +1,30 @@
+{
+  "name": "@algolia/autocomplete-example-tags-with-hits",
+  "description": "Autocomplete example with Tags and hits",
+  "version": "1.19.12",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "start": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@algolia/autocomplete-js": "1.19.12",
+    "@algolia/autocomplete-plugin-tags": "1.19.12",
+    "@algolia/autocomplete-theme-classic": "1.19.12",
+    "@algolia/client-search": "4.16.0",
+    "algoliasearch": "4.16.0",
+    "preact": "10.13.2",
+    "ramda": "0.27.1",
+    "search-insights": "^2.15.0"
+  },
+  "devDependencies": {
+    "vite": "5.0.7"
+  },
+  "keywords": [
+    "algolia",
+    "autocomplete",
+    "javascript"
+  ]
+}

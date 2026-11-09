@@ -1,0 +1,50 @@
+{
+  "name": "@adobe/spectrum-dna",
+  "description": "",
+  "type": "module",
+  "scripts": {
+    "moon": "moon",
+    "pre-commit": "lint-staged",
+    "prepare": "husky || true",
+    "release": "changeset publish",
+    "version": "changeset version && moon run :version",
+    "changeset-lint": "node tools/changeset-linter/src/cli.js",
+    "ai:sync": "node .ai/scripts/sync.js && node .ai/scripts/inventory.js && node .ai/scripts/llms.js",
+    "ai:check": "node .ai/scripts/validate.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/adobe/spectrum-design-data.git"
+  },
+  "author": "Garth Braithwaite <garthdb@gmail.com> (http://garthdb.com/)",
+  "contributors": [
+    "Aaron Brownlee <brownlee@adobe.com> (https://misterbrownlee.com)"
+  ],
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/adobe/spectrum-design-data/issues"
+  },
+  "homepage": "https://github.com/adobe/spectrum-design-data#readme",
+  "devDependencies": {
+    "@action-validator/core": "^0.6.0",
+    "@changesets/changelog-github": "^0.5.1",
+    "@changesets/cli": "^2.29.2",
+    "@commitlint/cli": "^19.8.0",
+    "@commitlint/config-conventional": "^19.8.0",
+    "@moonrepo/cli": "^1.39.1",
+    "ava": "^6.2.0",
+    "glob": "^11.0.2",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.5.1",
+    "prettier": "^3.5.3",
+    "remark": "^15.0.1",
+    "remark-cli": "^12.0.1",
+    "remark-frontmatter": "^5.0.0",
+    "remark-gfm": "^4.0.1",
+    "remark-github": "^12.0.0"
+  },
+  "engines": {
+    "node": "20.17.0"
+  },
+  "packageManager": "pnpm@10.17.1"
+}

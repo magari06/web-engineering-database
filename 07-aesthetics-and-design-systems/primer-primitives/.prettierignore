@@ -1,0 +1,6 @@
+dist/
+# next line needed for <Note> reference
+.changeset/*.md
+coverage/
+storybook-static
+

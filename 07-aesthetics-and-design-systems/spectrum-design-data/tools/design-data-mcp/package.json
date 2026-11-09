@@ -1,0 +1,58 @@
+{
+  "name": "@adobe/design-data-mcp",
+  "version": "1.9.7",
+  "description": "MCP server for Spectrum design tokens, component schemas, and design guidelines (embedded, offline)",
+  "type": "module",
+  "main": "./src/index.js",
+  "bin": {
+    "design-data-mcp": "./src/cli.js"
+  },
+  "files": [
+    "src/",
+    "llms.txt",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "start": "node src/cli.js",
+    "test": "ava"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/adobe/spectrum-design-data.git",
+    "directory": "tools/design-data-mcp"
+  },
+  "bugs": {
+    "url": "https://github.com/adobe/spectrum-design-data/issues"
+  },
+  "homepage": "https://github.com/adobe/spectrum-design-data/tree/main/tools/design-data-mcp#readme",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/",
+    "provenance": true
+  },
+  "dependencies": {
+    "@adobe/design-data": "workspace:*",
+    "@adobe/design-data-wasm": "workspace:*",
+    "@adobe/spectrum-design-data": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.27.1"
+  },
+  "devDependencies": {
+    "@anthropic-ai/mcpb": "^2.1.2",
+    "ava": "^6.0.1",
+    "sharp": "^0.35.1"
+  },
+  "engines": {
+    "node": ">=20.12.0"
+  },
+  "keywords": [
+    "mcp",
+    "spectrum",
+    "adobe",
+    "design-system",
+    "design-tokens",
+    "design-data"
+  ],
+  "author": "Adobe",
+  "license": "Apache-2.0"
+}

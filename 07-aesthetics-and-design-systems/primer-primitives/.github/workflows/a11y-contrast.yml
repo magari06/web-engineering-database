@@ -1,0 +1,188 @@
+name: A11y contrast check
+
+on:
+  pull_request:
+    branches-ignore:
+      - 'changeset-release/**'
+  workflow_dispatch:
+
+jobs:
+  changes:
+    uses: ./.github/workflows/hasChanged.yml
+
+  build:
+    needs: changes
+    if: needs.changes.outputs.tokens == 'true' || needs.changes.outputs.dependencies == 'true' || github.event_name == 'workflow_dispatch'
+    name: Check design token color contrast
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    outputs:
+      faildChecks: ${{ steps.check-results.outputs.faildChecks }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund --ignore-scripts
+
+      - name: Build tokens
+        run: npm run build:tokens
+
+      - name: Run required contrast validation tests
+        run: |
+          npm run check:contrast
+
+      - name: Prepare check results
+        id: check-results
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const results = require('./color-contrast-check.json');
+            const faildChecks = results.reduce((acc, {failingContrast}) => acc + failingContrast, 0);
+
+
+            // prepare outputs for all failed themes
+            const failedResults = results.filter(themeResults => themeResults.failingContrast > 0).map(({theme, failingContrast, markdownTable}) => ({
+              title: `# ❌ \`${theme}\`:  ${failingContrast} checks failed`,
+              body: `${markdownTable}`
+            }))
+
+            // prepare summary body
+            const summaryMarkdown = '## Design Token Contrast Check\n\n' + 
+              results.map(({theme, failingContrast, failedMarkdownTable}) => {
+                if(failingContrast === 0) {
+                  return "### \\`"+theme+"\\`: " + `✅ all checks passed\n\n`
+                }
+                // if there are failing checks, return a summary with a details section
+                return "### \\`"+theme+"\\`: " + `❌ ${failingContrast} checks failed\n\n` + 
+                '<details>' +
+                `<summary>Show results table for theme: ${theme}</summary>\n` +
+                "  \n"+
+                `  ${failedMarkdownTable}` +
+                '\n</details>'
+              }).join('\n\n')
+
+            // set output
+            core.setOutput('summaryMarkdown', summaryMarkdown)
+            core.setOutput('failedResults', failedResults)
+            core.setOutput('faildChecks', faildChecks)
+
+            // fail action if any contrast check fails
+            if (faildChecks > 0) {
+              core.setFailed(`\u001b[91;1m🛑 ${faildChecks} contrast checks failed. Please fix the failing checks and try again.\n\nCheck action summary for more details.`);
+            }
+            // success
+            else {
+              core.info('\u001b[32;1m✅ All contrast checks passed!')
+            }
+
+      - name: Report check results as summary
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const resultsMarkdown = `${{ steps.check-results.outputs.summaryMarkdown }}`
+
+            // output results to summary
+            core.summary.addRaw(resultsMarkdown, true)
+            core.summary.write({overwrite: true})
+
+      - name: Report check results as comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        with:
+          script: |
+            const results = ${{ steps.check-results.outputs.failedResults }}
+            const identifier = `<!-- contrast check -->` 
+            const WORKFLOW_SUMMARY_URL = `https://github.com/${{env.GITHUB_REPOSITORY}}/actions/runs/${{env.GITHUB_RUN_ID}}`
+
+            // get comments
+            const {data: comments} = await github.rest.issues.listComments({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo
+            });
+
+            // get token issue
+            const tokenCheckComment = comments.filter(comment => comment.body.includes(identifier));
+
+            // delete existing comments
+            if(tokenCheckComment.length > 0) {
+              for (const comment of tokenCheckComment) {
+                await github.rest.issues.deleteComment({
+                  comment_id: comment.id,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                })
+              }
+            }
+
+            for (const {title, body} of results) {
+              // get token issue
+
+              const outputBody = `${title}\n\n${body}\n\n<a href="${WORKFLOW_SUMMARY_URL}">→ Details</a>${identifier}`
+
+              // if token issue does not exist, create it
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: outputBody
+              })
+            }
+
+  Fail_action_on_contrast_failing:
+    needs: build
+    name: Fail action on contrast failing
+    if: needs.build.outputs.faildChecks > 0
+    runs-on: ubuntu-latest
+    steps:
+      - name: Contrast checks failed
+        run: |
+          echo "::error::${{ needs.build.outputs.faildChecks }} contrast checks failed. Please fix the failing checks and try again."
+          exit 1
+
+  remove_comment:
+    needs: changes
+    if: needs.changes.outputs.tokens == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remove comment and summary
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const identifier = `<!-- contrast check -->`
+            // get comments
+            const {data: comments} = await github.rest.issues.listComments({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo
+            });
+
+            // get token issue
+            const tokenCheckComment = comments.filter(comment => comment.body.includes(identifier));
+
+            // delete existing comments
+            if(tokenCheckComment.length > 0) {
+              for (const comment of tokenCheckComment) {
+                await github.rest.issues.deleteComment({
+                  comment_id: comment.id,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                })
+              }
+            }
+
+            // remove summary
+            core.summary.clear()
+            core.summary.write({overwrite: true})

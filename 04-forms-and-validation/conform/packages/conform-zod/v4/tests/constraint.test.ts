@@ -1,0 +1,627 @@
+import { describe, test, expect } from 'vitest';
+import { getZodConstraint } from '../index';
+import { getConstraints } from '../future';
+import { z } from 'zod-v4';
+
+describe('getZodConstraint', () => {
+	test('basic constraints', () => {
+		const schema = z
+			.object({
+				text: z
+					.string({ message: 'required' })
+					.min(10, 'min')
+					.max(100, 'max')
+					.refine(() => false, 'refine'),
+				number: z
+					.number({ message: 'required' })
+					.min(1, 'min')
+					.max(10, 'max')
+					.multipleOf(2, 'step'),
+				nullableNumber: z.number().min(1).max(10).nullable(),
+				timestamp: z
+					.date()
+					.min(new Date(1), 'min')
+					.max(new Date(), 'max')
+					.default(new Date()),
+				flag: z.boolean().optional(),
+				literalFlag: z.literal(true),
+				options: z
+					.array(z.enum(['a', 'b', 'c']).refine(() => false, 'refine'))
+					.min(3, 'min'),
+				nested: z
+					.object({
+						key: z.string().refine(() => false, 'refine'),
+					})
+					.refine(() => false, 'refine'),
+				list: z
+					.array(
+						z
+							.object({
+								key: z
+									.string({ message: 'required' })
+									.refine(() => false, 'refine'),
+							})
+							.refine(() => false, 'refine'),
+					)
+					.max(0, 'max'),
+				files: z
+					.array(
+						z.file({ message: 'Invalid file' }).mime(['image/*', 'video/*']),
+					)
+					.min(1, 'required'),
+				tuple: z.tuple([
+					z.string().min(3, 'min'),
+					z.number().max(100, 'max').optional(),
+				]),
+				transform: z
+					.object({
+						key: z.string(),
+					})
+					.transform((val) => val),
+				preprocess: z.preprocess(
+					(value) => value,
+					z.object({
+						key: z.string(),
+					}),
+				),
+				pipe: z
+					.object({
+						key: z.string(),
+					})
+					.pipe(
+						z.object({
+							key: z.string(),
+							key2: z.string().optional(),
+						}),
+					),
+				stringbool: z.stringbool(),
+			})
+			.refine(() => false, 'refine');
+
+		expect(getZodConstraint(schema)).toEqual({
+			text: {
+				required: true,
+				minLength: 10,
+				maxLength: 100,
+			},
+			number: {
+				required: true,
+				min: 1,
+				max: 10,
+			},
+			nullableNumber: {
+				required: true,
+				min: 1,
+				max: 10,
+			},
+			timestamp: {
+				required: false,
+			},
+			flag: {
+				required: false,
+			},
+			literalFlag: {
+				required: true,
+			},
+			options: {
+				required: true,
+				multiple: true,
+			},
+			'options[]': {
+				required: true,
+				pattern: 'a|b|c',
+			},
+			files: {
+				required: true,
+				multiple: true,
+			},
+			'files[]': {
+				required: true,
+				accept: 'image/*,video/*',
+			},
+			nested: {
+				required: true,
+			},
+			'nested.key': {
+				required: true,
+			},
+			list: {
+				required: true,
+				multiple: true,
+			},
+			'list[]': {
+				required: true,
+			},
+			'list[].key': {
+				required: true,
+			},
+			tuple: {
+				required: true,
+			},
+			'tuple[0]': {
+				required: true,
+				minLength: 3,
+			},
+			'tuple[1]': {
+				required: false,
+				max: 100,
+			},
+			transform: {
+				required: true,
+			},
+			'transform.key': {
+				required: true,
+			},
+			preprocess: {
+				required: true,
+			},
+			'preprocess.key': {
+				required: true,
+			},
+			pipe: {
+				required: true,
+			},
+			'pipe.key': {
+				required: true,
+			},
+			'pipe.key2': {
+				required: false,
+			},
+			stringbool: {
+				required: true,
+			},
+		});
+	});
+
+	test('index normalization', () => {
+		const schema = z.object({
+			options: z.array(z.enum(['a', 'b', 'c'])),
+			list: z.array(z.object({ key: z.string() })),
+			tuple: z.tuple([
+				z.string().min(3, 'min'),
+				z.number().max(100, 'max').optional(),
+			]),
+			files: z.array(z.file().mime(['image/*', 'video/*'])),
+		});
+		const constraint = getZodConstraint(schema);
+
+		expect(constraint['options[0]']).toEqual({
+			required: true,
+			pattern: 'a|b|c',
+		});
+		expect(constraint['list[0]']).toEqual({ required: true });
+		expect(constraint['list[0].key']).toEqual({ required: true });
+		expect(constraint['list[5].key']).toEqual({ required: true });
+		expect(constraint['tuple[0]']).toEqual({ required: true, minLength: 3 });
+		expect(constraint['tuple[1]']).toEqual({ required: false, max: 100 });
+		expect(constraint['files[2]']).toEqual({
+			required: true,
+			accept: 'image/*,video/*',
+		});
+
+		// No match returns undefined
+		expect(constraint['nonexistent']).toBeUndefined();
+		expect(constraint['list[0].missing']).toBeUndefined();
+	});
+
+	test('non-object schemas', () => {
+		expect(() => getZodConstraint(z.string())).toThrow();
+		expect(() => getZodConstraint(z.array(z.string()))).toThrow();
+	});
+
+	test('readonly', () => {
+		const schema = z
+			.object({
+				text: z.string().min(1, 'min').max(100, 'max').readonly(),
+				number: z.number().min(1, 'min').readonly(),
+				optionalText: z.string().min(1, 'min').readonly().optional(),
+				nested: z.object({ value: z.string().min(1, 'min') }).readonly(),
+			})
+			.readonly();
+
+		expect(getZodConstraint(schema)).toEqual({
+			text: { required: true, minLength: 1, maxLength: 100 },
+			number: { required: true, min: 1 },
+			optionalText: { required: false, minLength: 1 },
+			nested: { required: true },
+			'nested.value': { required: true, minLength: 1 },
+		});
+	});
+
+	test('intersection', () => {
+		const schema = z.object({
+			text: z.string().min(10, 'min').max(100, 'max'),
+			number: z.number().min(1, 'min').max(10, 'max'),
+		});
+
+		expect(
+			getZodConstraint(
+				schema.extend({ text: z.string().optional(), something: z.string() }),
+			),
+		).toEqual({
+			text: { required: false },
+			number: { required: true, min: 1, max: 10 },
+			something: { required: true },
+		});
+	});
+
+	test('union', () => {
+		const baseSchema = z.object({
+			qux: z.string().min(1, 'min'),
+		});
+		const schema = z.union([
+			baseSchema.extend({
+				type: z.literal('a'),
+				foo: z.string().min(1, 'min'),
+				baz: z.string().min(1, 'min'),
+			}),
+			baseSchema.extend({
+				type: z.literal('b'),
+				bar: z.string().min(1, 'min'),
+				baz: z.string().min(1, 'min').optional(),
+			}),
+		]);
+
+		expect(getZodConstraint(schema)).toEqual({
+			type: { required: true },
+			foo: { required: false, minLength: 1 },
+			bar: { required: false, minLength: 1 },
+			baz: { minLength: 1 },
+			qux: { required: true, minLength: 1 },
+		});
+
+		expect(getConstraints(schema)).toEqual({
+			type: { required: true },
+			foo: { required: true, minLength: 1 },
+			bar: { required: true, minLength: 1 },
+			baz: { minLength: 1 },
+			qux: { required: true, minLength: 1 },
+		});
+	});
+
+	test('discriminated union', () => {
+		const baseSchema = z.object({
+			qux: z.string().min(1, 'min'),
+		});
+		const schema = z.discriminatedUnion('type', [
+			baseSchema.extend({
+				type: z.literal('a'),
+				foo: z.string().min(1, 'min'),
+				baz: z.string().min(1, 'min'),
+			}),
+			baseSchema.extend({
+				type: z.literal('b'),
+				bar: z.string().min(1, 'min'),
+				baz: z.string().min(1, 'min').optional(),
+			}),
+		]);
+
+		expect(getZodConstraint(schema)).toEqual({
+			type: { required: true },
+			foo: { required: false, minLength: 1 },
+			bar: { required: false, minLength: 1 },
+			baz: { minLength: 1 },
+			qux: { required: true, minLength: 1 },
+		});
+
+		expect(getConstraints(schema)).toEqual({
+			type: { required: true },
+			foo: { required: true, minLength: 1 },
+			bar: { required: true, minLength: 1 },
+			baz: { minLength: 1 },
+			qux: { required: true, minLength: 1 },
+		});
+	});
+
+	test('getter-based recursive schema', () => {
+		// Binary tree — two recursive fields exercising multiple aliases
+		const TreeNode = z.object({
+			value: z.string().min(1),
+			get left(): z.ZodOptional<typeof TreeNode> {
+				return TreeNode.optional();
+			},
+			get right(): z.ZodOptional<typeof TreeNode> {
+				return TreeNode.optional();
+			},
+		});
+
+		const constraint = getZodConstraint(z.object({ root: TreeNode }));
+
+		// Static keys — left and right are optional recursive fields,
+		// so only the root-level entries are materialized
+		expect(constraint).toEqual({
+			root: { required: true },
+			'root.value': { required: true, minLength: 1 },
+			'root.left': { required: false },
+			'root.right': { required: false },
+		});
+
+		// Recursive resolution via left
+		expect(constraint['root.left.value']).toEqual({
+			required: true,
+			minLength: 1,
+		});
+		expect(constraint['root.left.left']).toEqual({ required: false });
+		expect(constraint['root.left.right']).toEqual({ required: false });
+
+		// Recursive resolution via right
+		expect(constraint['root.right.value']).toEqual({
+			required: true,
+			minLength: 1,
+		});
+
+		// Cross-branch recursion
+		expect(constraint['root.left.right.value']).toEqual({
+			required: true,
+			minLength: 1,
+		});
+		expect(constraint['root.right.left.value']).toEqual({
+			required: true,
+			minLength: 1,
+		});
+
+		// Multiple levels of recursion across both branches
+		expect(constraint['root.left.left.right.right.value']).toEqual({
+			required: true,
+			minLength: 1,
+		});
+
+		// No match
+		expect(constraint['root.nonexistent']).toBeUndefined();
+	});
+
+	test('z.lazy() based recursive schema', () => {
+		const baseCategorySchema = z.object({
+			name: z.string(),
+		});
+
+		type Category = z.infer<typeof baseCategorySchema> & {
+			subcategories: Category[];
+		};
+
+		const categorySchema: z.ZodType<Category> = baseCategorySchema.extend({
+			subcategories: z.lazy(() => categorySchema.array()),
+		});
+
+		const constraint = getZodConstraint(categorySchema);
+
+		// Static keys
+		expect(constraint).toEqual({
+			name: { required: true },
+			subcategories: { required: true, multiple: true },
+		});
+
+		// Recursive alias collapse
+		expect(constraint['subcategories[0].name']).toEqual({ required: true });
+		expect(constraint['subcategories[0].subcategories']).toEqual({
+			required: true,
+			multiple: true,
+		});
+		expect(constraint['subcategories[0].subcategories[1].name']).toEqual({
+			required: true,
+		});
+		expect(
+			constraint['subcategories[0].subcategories[1].subcategories[2].name'],
+		).toEqual({ required: true });
+	});
+
+	test('z.lazy() with discriminated union', () => {
+		type Condition =
+			| { type: 'filter' }
+			| { type: 'group'; conditions: Condition[] };
+
+		const ConditionSchema: z.ZodType<Condition> = z.discriminatedUnion('type', [
+			z.object({
+				type: z.literal('filter'),
+			}),
+			z.object({
+				type: z.literal('group'),
+				conditions: z.lazy(() => ConditionSchema.array()),
+			}),
+		]);
+
+		const FilterSchema = z.object({
+			type: z.literal('group'),
+			conditions: ConditionSchema.array(),
+		});
+
+		const constraint = getZodConstraint(FilterSchema);
+
+		// Static keys — both union options are traversed; recursion is
+		// caught when z.lazy() re-encounters ConditionSchema.
+		expect(constraint).toEqual({
+			type: { required: true },
+			conditions: { required: true, multiple: true },
+			'conditions[]': { required: true },
+			'conditions[].type': { required: true },
+			'conditions[].conditions': { required: false, multiple: true },
+		});
+
+		// Index normalization
+		expect(constraint['conditions[0].type']).toEqual({ required: true });
+		expect(constraint['conditions[0].conditions']).toEqual({
+			required: false,
+			multiple: true,
+		});
+
+		// Recursive alias collapse
+		expect(constraint['conditions[0].conditions[1].type']).toEqual({
+			required: true,
+		});
+		expect(
+			constraint['conditions[0].conditions[1].conditions[2].type'],
+		).toEqual({ required: true });
+
+		const fixedConstraint = getConstraints(FilterSchema);
+
+		expect(fixedConstraint?.['conditions[].conditions']).toEqual({
+			required: true,
+			multiple: true,
+		});
+		expect(fixedConstraint?.['conditions[0].conditions']).toEqual({
+			required: true,
+			multiple: true,
+		});
+	});
+
+	test('tuple with recursive element', () => {
+		const TreeNode = z.object({
+			value: z.string(),
+			get branch(): z.ZodTuple<[typeof TreeNode, z.ZodString]> {
+				return z.tuple([TreeNode, z.string()]);
+			},
+		});
+
+		const constraint = getZodConstraint(z.object({ root: TreeNode }));
+
+		// Static keys — branch[0] is the recursive TreeNode (no static entry),
+		// branch[1] is a plain string
+		expect(constraint).toEqual({
+			root: { required: true },
+			'root.value': { required: true },
+			'root.branch': { required: true },
+			'root.branch[1]': { required: true },
+		});
+
+		// Alias collapse through tuple index
+		expect(constraint['root.branch[0].value']).toEqual({ required: true });
+		expect(constraint['root.branch[0].branch[1]']).toEqual({
+			required: true,
+		});
+
+		// Deeper recursion through tuple
+		expect(constraint['root.branch[0].branch[0].value']).toEqual({
+			required: true,
+		});
+		expect(constraint['root.branch[0].branch[0].branch[0].value']).toEqual({
+			required: true,
+		});
+	});
+
+	test('regex patterns', () => {
+		const schema = z.object({
+			empty: z.string(),
+			single: z.string().regex(/^[A-Z]+$/),
+			multiple: z.string().regex(/[A-Z]/, 'uppercase').regex(/[0-9]/, 'digit'),
+		});
+
+		expect(getZodConstraint(schema)).toEqual({
+			empty: {
+				required: true,
+			},
+			single: {
+				required: true,
+				pattern: '^(?=.*(?:^[A-Z]+$)).*$',
+			},
+			multiple: {
+				required: true,
+				pattern: '^(?=.*(?:[A-Z]))(?=.*(?:[0-9])).*$',
+			},
+		});
+	});
+
+	test('folds repeated checks to the tightest bound', () => {
+		const schema = z.object({
+			ascendingMin: z.string().min(5).min(8),
+			descendingMin: z.string().min(8).min(5),
+			ascendingMax: z.string().max(3).max(10),
+			descendingMax: z.string().max(10).max(3),
+			exactLength: z.string().length(4),
+			number: z.number().min(1).min(5).max(10).max(8),
+			exclusive: z.number().gt(1).lt(10),
+		});
+
+		expect(getZodConstraint(schema)).toEqual({
+			ascendingMin: { required: true, minLength: 8 },
+			descendingMin: { required: true, minLength: 8 },
+			ascendingMax: { required: true, maxLength: 3 },
+			descendingMax: { required: true, maxLength: 3 },
+			exactLength: { required: true, minLength: 4, maxLength: 4 },
+			number: { required: true, min: 5, max: 8 },
+			exclusive: { required: true },
+		});
+	});
+
+	test('number formats', () => {
+		const schema = z.object({
+			int: z.int(),
+			int32: z.int32(),
+			uint32: z.uint32(),
+			boundedInt: z.number().min(1).int(),
+		});
+
+		expect(getZodConstraint(schema)).toEqual({
+			int: {
+				required: true,
+				min: Number.MIN_SAFE_INTEGER,
+				max: Number.MAX_SAFE_INTEGER,
+			},
+			int32: { required: true, min: -2147483648, max: 2147483647 },
+			uint32: { required: true, min: 0, max: 4294967295 },
+			boundedInt: {
+				required: true,
+				min: 1,
+				max: Number.MAX_SAFE_INTEGER,
+			},
+		});
+	});
+
+	test('string format patterns', () => {
+		const schema = z.object({
+			prefix: z.string().startsWith('abc'),
+			combined: z.string().regex(/[A-Z]/).endsWith('!'),
+		});
+
+		expect(getZodConstraint(schema)).toEqual({
+			prefix: { required: true, pattern: '^(?=.*(?:^abc.*)).*$' },
+			combined: {
+				required: true,
+				pattern: '^(?=.*(?:[A-Z]))(?=.*(?:.*!$)).*$',
+			},
+		});
+	});
+
+	test('file mime types', () => {
+		const schema = z.object({
+			image: z.file().mime(['image/png', 'image/jpeg']),
+			narrowed: z
+				.file()
+				.mime(['image/png', 'image/jpeg'])
+				.mime(['image/png', 'image/gif']),
+			disjoint: z.file().mime(['image/png']).mime(['image/gif']),
+		});
+
+		expect(getZodConstraint(schema)).toEqual({
+			image: { required: true, accept: 'image/png,image/jpeg' },
+			narrowed: { required: true, accept: 'image/png' },
+			disjoint: { required: true },
+		});
+	});
+
+	test('keeps constraints written to the bag', () => {
+		const text = z.string();
+		const number = z.number();
+
+		// Zod before 4.6 and third-party checks write their bounds here
+		Object.assign(text._zod.bag, { minimum: 2, maximum: 5 });
+		Object.assign(number._zod.bag, { minimum: 1 });
+
+		expect(getZodConstraint(z.object({ text, number }))).toEqual({
+			text: { required: true, minLength: 2, maxLength: 5 },
+			number: { required: true, min: 1 },
+		});
+	});
+
+	test('ignores bag values of an unexpected type', () => {
+		const text = z.string();
+		const file = z.file();
+
+		Object.assign(text._zod.bag, { minimum: '2', patterns: ['[a-z]'] });
+		Object.assign(file._zod.bag, { mime: 'image/png' });
+
+		expect(getZodConstraint(z.object({ text, file }))).toEqual({
+			text: { required: true },
+			file: { required: true },
+		});
+	});
+});

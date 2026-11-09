@@ -1,0 +1,162 @@
+# Posts a comment listing all the variables that changed in a PR
+name: Diff for design tokens
+on:
+  pull_request:
+    branches-ignore:
+      - 'changeset-release/**'
+  workflow_dispatch:
+
+jobs:
+  changes:
+    uses: ./.github/workflows/hasChanged.yml
+
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      diffs: ${{ steps.config.outputs.diffs }}
+    steps:
+      - name: Setup config
+        id: config
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.setOutput('diffs', `[{
+              "title": "Design Token Diff (CSS)",
+              "folder": "dist/css",
+              "globString": "**/**/*.css",
+              "outputFile": "diff_css.json"
+            },{
+              "title": "Design Token Diff (StyleLint)",
+              "folder": "dist/styleLint",
+              "globString": "**/**/*.json",
+              "outputFile": "diff_style_lint.json"
+            },{
+              "title": "Design Token Diff (Figma)",
+              "folder": "dist/figma",
+              "globString": "**/**/*.json",
+              "outputFile": "diff_figma.json"
+            },{
+              "title": "Design Token Diff (Fallbacks)",
+              "folder": "dist/fallbacks",
+              "globString": "**/**/*.json",
+              "outputFile": "diff_fallbacks.json"
+            }]`)
+
+  diff:
+    needs: [changes, setup]
+    if: needs.changes.outputs.outputAffected == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Checkout base branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.base_ref }}
+          path: base
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies (pr)
+        run: npm ci --no-audit --no-fund --include=dev --ignore-scripts
+
+      - name: Build tokens (pr)
+        run: npm run build
+
+      - name: Install dependencies (base)
+        run: pushd base; npm i --no-audit --no-fund --ignore-scripts; popd
+
+      - name: Build tokens (base)
+        run: pushd base; npm run build; popd
+
+      - name: Install dependecies for diffing
+        run: npm install shelljs
+
+      - name: Diff tokens
+        id: diff-files
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs')
+            const diffFiles = require('./.github/workflows/utilities/diffFiles.cjs')
+
+            // get config
+            const diffConfig = ${{ needs.setup.outputs.diffs }}
+
+            // create diff for each config
+            for (const config of diffConfig) {
+              await diffFiles(config, 'base')
+            }
+
+      - name: Write summary
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs')
+            const addSummary = require('./.github/workflows/utilities/addSummary.cjs')
+            const diffConfig = ${{ needs.setup.outputs.diffs }}
+
+            const output = []
+            // read diff files
+            for (const config of diffConfig) {
+              const diff = JSON.parse(fs.readFileSync(config.outputFile, 'utf8'))
+              // add to output
+              output.push({
+                title: config.title,
+                sections: diff
+              })
+            }
+
+            // add summary
+            addSummary(output, true)
+
+      - name: Comment on pr
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        with:
+          script: |
+            const fs = require('fs')
+            const addComment = require('./.github/workflows/utilities/addComment.cjs')
+            const diffConfig = ${{ needs.setup.outputs.diffs }}
+            const WORKFLOW_SUMMARY_URL = `https://github.com/${{env.GITHUB_REPOSITORY}}/actions/runs/${{env.GITHUB_RUN_ID}}`
+
+            // read diff files
+            for (const config of diffConfig) {
+              const diff = JSON.parse(fs.readFileSync(config.outputFile, 'utf8'))
+              await addComment({
+                title: config.title,
+                sections: diff
+              }, WORKFLOW_SUMMARY_URL, context, github)
+            }
+
+  remove_comment:
+    needs: [changes, setup]
+    if: needs.changes.outputs.outputAffected == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Remove comment and summary
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const deleteComment = require('./.github/workflows/utilities/deleteCommentByContent.cjs')
+            const diffs = ${{ needs.setup.outputs.diffs }}
+            const commentTitles = diffs.map(({title}) => title)
+            // delete all comments
+            for (const title of commentTitles) {
+              await deleteComment(`## ${title}`, context, github)
+            }
+
+            // remove summary
+            core.summary.clear()
+            core.summary.write({overwrite: true})

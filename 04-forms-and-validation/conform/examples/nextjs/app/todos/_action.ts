@@ -1,0 +1,28 @@
+'use server';
+
+import { parseSubmission, report } from '@conform-to/react/future';
+import { revalidatePath } from 'next/cache';
+import { updateTodos } from '@/app/todos/_store';
+import { schema } from './_schema';
+
+export async function createTodos(_: unknown, formData: FormData) {
+	const id = formData.get('id');
+	const storeId = typeof id === 'string' ? id : undefined;
+	const submission = parseSubmission(formData);
+	const result = schema.safeParse(submission.payload);
+
+	if (!result.success) {
+		return report(submission, {
+			error: {
+				issues: result.error.issues,
+			},
+		});
+	}
+
+	await updateTodos(result.data, storeId);
+	revalidatePath('/todos');
+
+	return report(submission, {
+		reset: true,
+	});
+}

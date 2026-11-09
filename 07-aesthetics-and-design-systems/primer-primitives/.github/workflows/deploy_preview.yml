@@ -1,0 +1,52 @@
+name: Deploy preview
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+  deployments: write
+
+jobs:
+  deploy:
+    name: Build and deploy
+    uses: primer/.github/.github/workflows/deploy_preview.yml@v2
+    with:
+      node_version: 20
+      install: npm ci --no-audit --no-fund --ignore-scripts && npm run storybook:install
+      build: npm run build && cd docs/storybook && npm run build:preview
+      output_dir: docs/public
+
+  post_storybook:
+    needs: deploy
+    name: Link storybook
+    runs-on: ubuntu-latest
+    permissions:
+      deployments: write
+    steps:
+      - uses: chrnorm/deployment-action@v2
+        name: Post deployment url
+        id: deployment
+        with:
+          token: '${{ secrets.GITHUB_TOKEN }}'
+          environment-url: ${{needs.deploy.outputs.deployment_url}}storybook
+          environment: Preview (Storybook)
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Update deployment status (success)
+        if: success()
+        uses: chrnorm/deployment-status@v2
+        with:
+          token: '${{ secrets.GITHUB_TOKEN }}'
+          environment-url: ${{needs.deploy.outputs.deployment_url}}storybook
+          state: 'success'
+          deployment-id: ${{ steps.deployment.outputs.deployment_id }}
+      - name: Update deployment status (failure)
+        if: failure()
+        uses: chrnorm/deployment-status@v2
+        with:
+          token: '${{ secrets.GITHUB_TOKEN }}'
+          environment-url: ${{needs.deploy.outputs.deployment_url}}storybook
+          state: 'failure'
+          deployment-id: ${{ steps.deployment.outputs.deployment_id }}

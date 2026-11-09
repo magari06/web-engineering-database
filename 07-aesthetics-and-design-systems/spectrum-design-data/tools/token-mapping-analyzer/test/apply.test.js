@@ -1,0 +1,387 @@
+// Copyright 2026 Adobe. All rights reserved.
+// This file is licensed to you under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License. You may obtain a copy
+// of the License at http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under
+// the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+// OF ANY KIND, either express or implied. See the License for the specific language
+// governing permissions and limitations under the License.
+
+import test from "ava";
+import { readFileSync, readdirSync } from "fs";
+import { resolve, dirname } from "path";
+import { fileURLToPath } from "url";
+import { loadRegistries } from "../src/registry-index.js";
+import { serialize } from "../src/decomposer.js";
+import { scopeToName } from "../src/ctr-scope.js";
+import {
+  applyField,
+  applySpaceBetween,
+  applyScaleIndex,
+} from "../src/apply.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const CASCADE_DIR = resolve(__dirname, "../../../packages/design-data/tokens");
+const RELATIONSHIPS_DIR = resolve(
+  __dirname,
+  "../../../packages/design-data/relationships",
+);
+
+// Domain fields that decompose() can extract from `property` alongside (or
+// instead of) size. A token carrying any of these was a multi-field
+// decomposition, whose legacy key this test's single-field splice can't
+// reconstruct — that case is covered instead by the Rust-backed
+// roundtrip check (moon run design-data:roundtrip-verify).
+const OTHER_DECOMPOSABLE_FIELDS = [
+  "density",
+  "structure",
+  "position",
+  "from",
+  "to",
+  "anatomy",
+  "object",
+  "shape",
+  "orientation",
+  "alignment",
+  "family",
+  "weight",
+  "style",
+  "emphasis",
+  "colorFamily",
+  "colorRole",
+  "colorScheme",
+  "contrast",
+  "easing",
+  "motionRole",
+  "icon",
+];
+
+/** Recursively collect every token object decomposed for `size` alone. */
+function collectMigrated(obj, acc = []) {
+  if (Array.isArray(obj)) {
+    obj.forEach((v) => collectMigrated(v, acc));
+    return acc;
+  }
+  if (obj && typeof obj === "object") {
+    if (
+      obj.name &&
+      typeof obj.name === "object" &&
+      obj.name.size !== undefined &&
+      !OTHER_DECOMPOSABLE_FIELDS.some((f) => obj.name[f] !== undefined)
+    ) {
+      acc.push(obj);
+    }
+    for (const v of Object.values(obj)) collectMigrated(v, acc);
+  }
+  return acc;
+}
+
+/**
+ * Reconstruct a pre-CTR-migration `name` object from a relationship's `scope`
+ * (inverse of migrate-to-relationships.mjs's convertScopedToken), so tokens
+ * that were name.component-scoped and migrated to relationships/*.json still
+ * surface here as if they were still in tokens/*.json.
+ */
+function ctrToNameToken(ctr) {
+  const { scope, legacyKey } = ctr;
+  const name = scopeToName(scope);
+  if (legacyKey) name.legacyKey = legacyKey;
+  return { ...ctr, name };
+}
+
+/**
+ * Every CTR across relationships/*.json, reconstructed as name-shaped tokens.
+ * name.component tokens that used to live in the cascade file can end up
+ * scattered across many components' relationship files, not just one.
+ */
+function loadAllRelationshipTokens() {
+  return readdirSync(RELATIONSHIPS_DIR)
+    .filter((f) => f.endsWith(".json"))
+    .flatMap((f) =>
+      JSON.parse(readFileSync(resolve(RELATIONSHIPS_DIR, f), "utf-8")).map(
+        ctrToNameToken,
+      ),
+    );
+}
+
+/** Load a cascade token file plus every migrated token now living in relationships/*.json. */
+function loadCascadeWithRelationships(filename) {
+  const data = JSON.parse(
+    readFileSync(resolve(CASCADE_DIR, filename), "utf-8"),
+  );
+  return [...data, ...loadAllRelationshipTokens()];
+}
+
+// Verifies that size decomposition preserved the legacy key for every migrated token.
+//
+// The check is independent of decompose() by reconstructing the pre-migration name
+// object from scratch: since size was the only field extracted from property, the
+// pre-migration property = postMigration.property + "-" + sizeTokenName. Serializing
+// that name must produce the same legacy key as serializing the post-migration name.
+//
+// This is the JS-layer consistency check. The Rust-backed golden-reference check is
+// tokens:verifyLegacyOutput (compares generated legacy output against committed src/).
+test("size decomposition preserves the legacy key — layout-component.tokens.json", (t) => {
+  const registry = loadRegistries();
+  const data = loadCascadeWithRelationships("layout-component.tokens.json");
+  const migrated = collectMigrated(data);
+
+  t.true(
+    migrated.length > 0,
+    "Expected at least one token with size field in layout-component.tokens.json",
+  );
+
+  for (const tok of migrated) {
+    // Post-migration serialization.
+    const postKey = serialize(
+      tok.name,
+      registry.tokenNameMap,
+      registry.serializationOrder,
+    );
+
+    // Reconstruct the pre-migration name: re-embed the size tokenName back into
+    // property. Only size was extracted, so appending its long form gives the original
+    // compound property value. Note: this reconstruction is only valid when a single
+    // field was decomposed; multi-field migrations need a different approach.
+    const sizeLong = registry.tokenNameMap[tok.name.size] ?? tok.name.size;
+    const preMigName = {
+      ...tok.name,
+      property: `${tok.name.property}-${sizeLong}`,
+    };
+    delete preMigName.size;
+    const preKey = serialize(
+      preMigName,
+      registry.tokenNameMap,
+      registry.serializationOrder,
+    );
+
+    t.is(
+      postKey,
+      preKey,
+      `Token ${tok.uuid?.slice(0, 8)}: size decomposition must preserve the legacy key (pre: ${preKey})`,
+    );
+    t.truthy(
+      tok.name.property,
+      `Token ${tok.uuid?.slice(0, 8)}: must have non-empty property after decomposition`,
+    );
+  }
+});
+
+test("size decomposition preserves the legacy key — layout.tokens.json", (t) => {
+  const registry = loadRegistries();
+  const data = JSON.parse(
+    readFileSync(resolve(CASCADE_DIR, "layout.tokens.json"), "utf-8"),
+  );
+  const migrated = collectMigrated(data);
+
+  t.true(
+    migrated.length > 0,
+    "Expected at least one token with size field in layout.tokens.json",
+  );
+
+  for (const tok of migrated) {
+    const postKey = serialize(
+      tok.name,
+      registry.tokenNameMap,
+      registry.serializationOrder,
+    );
+    const sizeLong = registry.tokenNameMap[tok.name.size] ?? tok.name.size;
+    const preMigName = {
+      ...tok.name,
+      property: `${tok.name.property}-${sizeLong}`,
+    };
+    delete preMigName.size;
+    const preKey = serialize(
+      preMigName,
+      registry.tokenNameMap,
+      registry.serializationOrder,
+    );
+
+    t.is(
+      postKey,
+      preKey,
+      `Token ${tok.uuid?.slice(0, 8)}: size decomposition must preserve the legacy key (pre: ${preKey})`,
+    );
+    t.truthy(
+      tok.name.property,
+      `Token ${tok.uuid?.slice(0, 8)}: must have non-empty property after decomposition`,
+    );
+  }
+});
+
+// ── applySpaceBetween ─────────────────────────────────────────────────────
+
+test("applySpaceBetween writes from/to/property for a clean gap token and preserves the legacy key", (t) => {
+  const registry = loadRegistries();
+  const tokens = [
+    {
+      name: { component: "accordion", property: "bottom-to-handle" },
+      value: "8px",
+    },
+  ];
+  const legacyKeyBefore = serialize(
+    tokens[0].name,
+    registry.tokenNameMap,
+    registry.serializationOrder,
+  );
+
+  const { applied } = applySpaceBetween(
+    tokens,
+    registry,
+    "fixture.tokens.json",
+  );
+
+  t.is(applied, 1);
+  t.is(tokens[0].name.property, "space-between");
+  t.is(tokens[0].name.from, "bottom");
+  t.is(tokens[0].name.to, "handle");
+  t.is(
+    serialize(
+      tokens[0].name,
+      registry.tokenNameMap,
+      registry.serializationOrder,
+    ),
+    legacyKeyBefore,
+  );
+});
+
+test("applySpaceBetween skips a token whose endpoint can't fully resolve", (t) => {
+  const registry = loadRegistries();
+  const tokens = [
+    {
+      name: {
+        component: "slider",
+        property: "control-to-field-label-side-medium",
+      },
+      value: "8px",
+    },
+  ];
+
+  const { applied } = applySpaceBetween(
+    tokens,
+    registry,
+    "fixture.tokens.json",
+  );
+
+  t.is(applied, 0);
+  t.is(tokens[0].name.from, undefined);
+  t.is(tokens[0].name.property, "control-to-field-label-side-medium");
+});
+
+test("applySpaceBetween skips tokens already migrated", (t) => {
+  const registry = loadRegistries();
+  const tokens = [
+    {
+      name: {
+        component: "accordion",
+        property: "space-between",
+        from: "bottom",
+        to: "handle",
+      },
+      value: "8px",
+    },
+  ];
+
+  const { applied } = applySpaceBetween(
+    tokens,
+    registry,
+    "fixture.tokens.json",
+  );
+
+  t.is(applied, 0);
+});
+
+// A property string that stacks two concepts (script + emphasis) must have both
+// extracted together in one applyField call, even though only "script" was
+// requested: decompose() strips both from `property` at once, so writing back
+// only the targeted field (and the fully-stripped property) would silently
+// drop the other and break the roundtrip. Regression test for that bug.
+test("applyField extracts co-occurring fields together to preserve the roundtrip", (t) => {
+  const registry = loadRegistries();
+  const tokens = [
+    {
+      name: { property: "cjk-strong-font-weight" },
+      value: "700",
+    },
+  ];
+
+  const { applied } = applyField(
+    tokens,
+    "script",
+    registry,
+    "fixture.tokens.json",
+  );
+
+  t.is(applied, 1);
+  t.is(tokens[0].name.script, "cjk");
+  t.is(tokens[0].name.emphasis, "strong");
+  t.is(tokens[0].name.property, "font-weight");
+  t.is(
+    serialize(
+      tokens[0].name,
+      registry.tokenNameMap,
+      registry.serializationOrder,
+    ),
+    "cjk-strong-font-weight",
+  );
+});
+
+// decompose() can resolve `anatomy` as a side effect of extracting an unrelated
+// field (e.g. "heading-serif-emphasized-font-weight" -> anatomy:"heading" +
+// family:"serif" + emphasis:"emphasized"). Without a component field, applying
+// that merge violates SPEC-025 (anatomy requires component) even though the
+// *targeted* field was "family", not "anatomy". Regression test for that bug.
+test("applyScaleIndex migrates icon size-N tokens (dsi.6 icon follow-up, spectrum-design-data-5p3)", (t) => {
+  const registry = loadRegistries();
+  const tokens = [
+    // Plain icon owner.
+    { name: { icon: "add", property: "size-200", scale: "desktop" } },
+    // "link-out-icon" also exists as an anatomy term of the same length —
+    // this token exercises that collision (see decomposer.test.js).
+    { name: { icon: "link-out", property: "size-100", scale: "mobile" } },
+  ];
+
+  const { applied } = applyScaleIndex(
+    tokens,
+    registry,
+    "layout-component.tokens.json",
+  );
+
+  t.is(applied, 2);
+  t.deepEqual(tokens[0].name, {
+    icon: "add",
+    property: "size",
+    scale: "desktop",
+    scaleIndex: 200,
+  });
+  t.deepEqual(tokens[1].name, {
+    icon: "link-out",
+    property: "size",
+    scale: "mobile",
+    scaleIndex: 100,
+  });
+});
+
+test("applyField skips a merge that would introduce a SPEC-025 violation (anatomy without component)", (t) => {
+  const registry = loadRegistries();
+  const tokens = [
+    {
+      name: { property: "heading-serif-emphasized-font-weight" },
+      value: "700",
+    },
+  ];
+
+  const { applied, skippedSpec025 } = applyField(
+    tokens,
+    "family",
+    registry,
+    "fixture.tokens.json",
+  );
+
+  t.is(applied, 0);
+  t.is(skippedSpec025, 1);
+  t.is(tokens[0].name.family, undefined);
+  t.is(tokens[0].name.anatomy, undefined);
+  t.is(tokens[0].name.property, "heading-serif-emphasized-font-weight");
+});

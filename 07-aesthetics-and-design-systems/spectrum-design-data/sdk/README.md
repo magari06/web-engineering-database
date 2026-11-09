@@ -1,0 +1,394 @@
+# Spectrum Design Data SDK
+
+A Rust workspace that produces the `design-data` CLI — tooling for validating, resolving, querying, diffing, and migrating Spectrum design tokens against the [Design Data Specification](../packages/design-data-spec/). Includes an optional bridge to the Figma Variables REST API.
+
+Licensed under [Apache-2.0](../LICENSE).
+
+## Workspace layout
+
+```
+sdk/
+├── core/               # design-data-core library
+│   └── src/
+│       ├── cascade/    # cascade resolution
+│       ├── validate/   # two-layer validation (structural + relational)
+│       ├── diff/       # token dataset diffing
+│       ├── query/      # filter expressions
+│       ├── cache/      # derived redb cache over canonical JSON (default-on)
+│       ├── migrate/    # snapshot, convert, legacy helpers
+│       ├── schema/     # JSON Schema registry
+│       └── registry/   # design-system registry data
+├── cli/                # design-data-cli binary (design-data)
+├── tui/                # design-data-tui: terminal UI (also has a package.json for the pnpm workspace)
+├── wasm/               # design-data-wasm: WASM bindings
+├── plugins/
+│   ├── dtcg/           # DTCG (Design Tokens Community Group) format plugin
+│   └── figma/          # Figma Variables bridge (import/export/mapping)
+├── scripts/            # Node helpers (codegen, version sync)
+├── moon.yml            # moonrepo task definitions
+└── rust-toolchain.toml # pinned toolchain (Rust 1.85.0)
+```
+
+## Build
+
+The toolchain is pinned in `rust-toolchain.toml` and installed automatically by `rustup`.
+
+From the repo root (preferred — runs codegen checks first):
+
+```bash
+moon run sdk:build
+```
+
+Or directly inside `sdk/`:
+
+```bash
+cargo build --workspace
+```
+
+The built binary is at `sdk/target/debug/design-data`.
+
+## CLI usage
+
+All subcommands accept `--help` for full flag documentation.
+
+### validate
+
+Validate a token file or directory against JSON Schemas (Layer 1) and relational catalog rules (Layer 2).
+
+```bash
+design-data validate packages/design-data/tokens
+design-data validate packages/design-data/tokens --strict
+design-data validate packages/design-data/tokens --format json
+
+# Optional overrides
+design-data validate packages/design-data/tokens \
+  --schema-path packages/design-data-spec \
+  --exceptions-path naming-exceptions.json \
+  --mode-sets-path packages/design-data/mode-sets \
+  --components-path packages/design-data/components
+```
+
+### resolve
+
+Resolve a single token property to its final value for a given mode context. `PROPERTY`
+is a token's `name.property` value (e.g. `color`, `size`, `typography`) — not a full
+legacy token slug.
+
+```bash
+design-data resolve color packages/design-data/tokens \
+  --color-scheme light \
+  --scale desktop \
+  --contrast regular
+```
+
+Use `--format dtcg` to emit a [W3C DTCG](https://tr.designtokens.org/format/)-conformant
+`$value`/`$type`/`$description` document from the resolved token, for consumption by
+Style Dictionary, Terrazzo, and similar tooling. The resolved leaf's `$schema` token-type
+drives `$type` (color, dimension, typography, shadow, ...); inline `{alias}` references
+inside composite values (typography, drop-shadow) are resolved to literal values:
+
+```bash
+design-data resolve color packages/design-data/tokens --color-scheme light --format dtcg
+# {
+#   "accent-background-color-default": {
+#     "$value": "#3b63fb",
+#     "$type": "color"
+#   }
+# }
+```
+
+### export
+
+Export the whole resolved dataset — every distinct token property resolved to its
+cascade winner in a given mode context — as one flat document.
+
+```bash
+design-data export packages/design-data/tokens --color-scheme dark --format dtcg
+# {
+#   "accent-background-color-default": { "$value": "#4069fd", "$type": "color" },
+#   "font-size-200": { "$value": { "value": 16.0, "unit": "px" }, "$type": "dimension" },
+#   ...
+# }
+design-data export packages/design-data/tokens --format json  # raw cascade-winner records
+```
+
+Like `resolve --format dtcg`, inline `{alias}` references inside composite values
+(typography, drop-shadow) are resolved in the active mode context.
+
+### diff
+
+Compare two token datasets and report additions, removals, and changes.
+
+```bash
+design-data diff packages/design-data/tokens packages/tokens-next/src
+design-data diff old/ new/ --filter "component=button"
+design-data diff old/ new/ --format json
+```
+
+### changelog
+
+Appends a release to each component's `changelog/<component>.json` by diffing two git revisions of a dataset (see `spec/component-changelog.md`). Works on any dataset in any git repository.
+
+```bash
+design-data changelog --from @adobe/spectrum-design-data@3.7.1 --to HEAD --release 3.8.0 --dataset packages/design-data
+# Backfill: one release per stable tag, then the tail under --release
+design-data changelog --from @adobe/spectrum-design-data@2.1.0 --to HEAD --tags '@adobe/spectrum-design-data@*' --release unreleased
+```
+
+Each commit is diffed once for every component. Releases already recorded are never rewritten, so running it twice gives the same output.
+
+### query
+
+List tokens matching a filter expression.
+
+```bash
+design-data query packages/design-data/tokens --filter "component=button,state=hover"
+design-data query packages/design-data/tokens --filter "component=button" --count
+design-data query packages/design-data/tokens --filter "component=button" --format json
+```
+
+Use `--format dtcg` to merge only the matched properties' cascade winners into one
+DTCG document (accepts the same `--color-scheme/--scale/--contrast` mode flags as
+`resolve`/`export`):
+
+```bash
+design-data query packages/design-data/tokens --filter "component=button" \
+  --format dtcg --color-scheme dark
+```
+
+### migrate
+
+Snapshot and backward-compatibility helpers.
+
+```bash
+design-data migrate snapshot packages/design-data/tokens --output golden.json
+design-data migrate verify  packages/design-data/tokens --snapshot golden.json
+design-data migrate convert input/ --output output/
+design-data migrate legacy-output input/ --output output/
+design-data migrate add-uuids input/ --output output/
+design-data migrate roundtrip-verify packages/tokens/src
+```
+
+### cache-build
+
+Build a portable `.redb` cache asset from a token dataset (for WASM web tools or offline distribution).
+
+```bash
+design-data cache-build packages/design-data/tokens -o index.redb
+design-data cache-build packages/design-data/tokens \
+  --mode-sets-path packages/design-data/mode-sets \
+  --components-path packages/design-data/components \
+  -o index.redb
+```
+
+### Derived cache (CLI/TUI)
+
+The SDK builds a **derived, content-addressed redb cache** over the canonical JSON on disk. JSON remains the source of truth; the cache is rebuildable and never load-bearing (any cache error falls back to JSON parsing).
+
+| Variable / flag           | Purpose                                                               |
+| ------------------------- | --------------------------------------------------------------------- |
+| `DESIGN_DATA_CACHE_DIR`   | Override the OS cache root (default: `dirs::cache_dir()/design-data`) |
+| `DESIGN_DATA_LOG=debug`   | Log cache miss/rebuild/fallback events to stderr                      |
+| `design-data cache-build` | Emit a portable `index.redb` blob for WASM or CI artifacts            |
+| `--mode-sets-path`        | Include spec mode-sets catalog in cache build (resolved by default)   |
+| `--components-path`       | Include spec components catalog in cache build (resolved by default)  |
+
+Cache files live at `<cache_root>/cache/<tokens-version>/<dataset-key>.redb` and are gitignored (`*.redb`). The dataset key incorporates the tokens root and any configured catalog directories.
+
+**Schema v2** persists tokens, query indexes (`idx_*`), inline mode-set docs co-located in the token tree, and spec catalog `mode_sets` / `components` tables. Stale v1 caches auto-invalidate on upgrade.
+
+**Invalidation** uses per-file size + mtime (not a full content hash) for speed. A stale miss only forces a rebuild. **Known limitation:** sidecar name directories merged by `from_json_dir_with_names` are not part of the cache build path.
+
+**Cache file keys:** `open_cached` (tokens only) and `open_cached_with_catalogs` produce different on-disk files for the same tokens root. CLI/TUI pass catalogs; WASM/tools using plain `build_bytes` / `open_cached` get a separate entry unless they use the `*_with_catalogs` variants.
+
+**Platform manifest (CLI/TUI):** Both surfaces apply a manifest at session start, selected by `--platform`, `DESIGN_DATA_PLATFORM`, `default_platform`, or the legacy top-level `manifest` key in `.design-data.toml` (see [Configuring design-data for your platform](../docs/site/src/articles/configuring-design-data-for-your-platform.md)), via the shared `design-data-core::manifest::apply_configured` helper. Query/find use the platform-scoped token set and index; `:resolve` layers manifest mode-set restrictions through `cascade::resolve_property`. The TUI header shows `N platform` (vs `N tokens`) when a manifest is active. CLI `primer` reports token count from the hydrated graph (catalogs included); it does not apply a platform manifest filter.
+
+Opt out of the cache layer when depending on `design-data-core` as a library:
+
+```toml
+design-data-core = { path = "../core", default-features = false }
+```
+
+### figma
+
+Interact with the Figma Variables REST API. Requires a `FIGMA_TOKEN` environment variable.
+
+```bash
+export FIGMA_TOKEN=<your-token>
+design-data figma read --file-key <KEY> --format json > figma-vars.json
+design-data figma export --file-key <KEY> --dry-run > figma-payload.json
+```
+
+Export reads canonical `packages/design-data` (tokens plus relationships) directly and
+applies any `--manifest` cascade; it does not read `packages/tokens`. `PATH` is optional
+and must point at a cascade (`.tokens.json`) directory; legacy-format directories
+are rejected. The mapper consumes the token graph directly. Omit `--dry-run` to write variables to the
+file. Dry runs still read the file through the API to obtain collection and mode IDs.
+
+Pass `--redirect-deprecated` to export each deprecated token that names a
+replacement (`renamed`) as an alias to the terminal replacement in every mode,
+instead of its own literal value. Redirecting changes the values designs render
+(for example `accordion-minimum-width` 200px becomes `list-item-minimum-width-medium`
+192px), so review a `--dry-run` first. Tokens with no usable replacement keep
+their value and are listed in the summary.
+
+Writes capture a raw baseline, build one immutable payload, and fetch the file
+again immediately before POST. Concurrent changes abort the write; only
+collection `variableIds` membership ordering is ignored. Mode order and API
+metadata such as `isExtension` remain significant. This is a best-effort guard,
+not an atomic transaction: Figma can still change between the final GET and POST.
+
+After POST, export maps temporary IDs to real IDs and fetches readback. It checks
+emitted metadata, scalar/color values, alias target IDs, and unchanged unrelated
+variables, deprecated variables, modes and collections. Only written numeric
+values use an absolute tolerance (default `1e-6`, covering observed Figma storage
+noise); untouched state and concurrency checks are exact. Use
+`--numeric-tolerance <NUMBER>` to change this finite, nonnegative tolerance.
+
+`--verification-out <DIR>` records `preflight.json` (including a payload SHA-256),
+`readback.json`, or `ambiguous-outcome.json`. Reports contain verification results,
+not the access token or raw API response. Use a fresh report directory for each
+attempt; existing reports are never overwritten by another attempt. Dry-run
+creates no reports.
+Verification failures return nonzero even after Figma accepted the POST. A
+transport failure, server error, or malformed POST response triggers one
+read-only probe and a nonzero ambiguous-outcome error. The CLI never retries a
+mutation. Inspect the live file before another write; a changed probe alone
+cannot prove that the intended payload landed.
+
+The explicit escape hatches are `--allow-concurrent-changes` (warns about drift,
+then protects the latest unrelated state during readback) and
+`--skip-readback-verification` (reports an **unverified write**, never "Done").
+Neither bypasses ambiguous-outcome handling. These commands do not perform the
+separate Figma library **Publish** action. Automated tests use a loopback HTTP
+server; a live write needs separate approval.
+
+Font weights export as Figma style strings (`Regular`, `Bold`, `ExtraBold`, and
+the other supported weights), not numeric CSS weights. Numeric angle tokens
+export as FLOAT values in degrees. These conversions also apply to aliases
+and scale-set members; canonical token values are unchanged.
+
+Unitless `multiplier.json` tokens export as FLOAT values without conversion.
+Top-level aliases use `VARIABLE_ALIAS` references when their targets are exported;
+alias chains can reference the terminal scalar or mode-set variable. A reference
+to a mode set keeps its mode-dependent values rather than copying one default
+value. Existing variable IDs and name-mapping overrides apply to these targets.
+
+The size-taxonomy snapshot's 11 line-height and radius aliases are supported:
+
+| Aliases                                                                      | Target                | Unitless value |
+| ---------------------------------------------------------------------------- | --------------------- | -------------- |
+| `body-line-height`, `code-line-height`                                       | `line-height-200`     | 1.5            |
+| `detail-line-height`, `heading-line-height`, `title-line-height`             | `line-height-100`     | 1.3            |
+| `body-cjk-line-height`, `code-cjk-line-height`                               | `cjk-line-height-200` | 1.7            |
+| `detail-cjk-line-height`, `heading-cjk-line-height`, `title-cjk-line-height` | `cjk-line-height-100` | 1.5            |
+| `corner-radius-full`                                                         | `corner-radius-1000`  | 0.5            |
+
+Android `dp` dimensions remain excluded from export because Figma has no `dp`
+unit. The export summary lists them as unsupported units. Audit JSON reports
+their token names in `skipped_unsupported_unit`, separately from
+`skipped_unparseable_value` for malformed values.
+
+Aliases to excluded schemas (`typography`, `drop-shadow`, `gradient-stop`,
+`alignment`, and `text-transform`) or unknown schemas appear in
+`skipped_alias_unsupported`, with the terminal target name, schema URL, and
+reason. The exporter has no supported Figma Variable mapping for these schemas.
+Missing targets and cycles remain in `skipped_alias_unresolved`; malformed
+terminal values appear in `skipped_unparseable_value`. The exporter drops
+references to targets that failed to export, so the payload has no dangling aliases.
+
+Audit the generator's output against a saved snapshot without an API call:
+
+```bash
+design-data figma audit --snapshot figma-vars.json --token-dir packages/design-data/tokens
+```
+
+Diff the manifest-resolved dataset against a Figma file's actual variable
+values — read-only, value-level, and works either offline against a captured
+snapshot or live against `--file-key`/`--token`. Classifies every variable/
+token as `match`, `value-mismatch`, `figma-only`, `design-data-only`,
+`renamed` (via `--mapping`), `skipped-uncovered`, or `multi-mode-mismatch`
+(a genuinely multi-mode variable, e.g. `.Color theme`'s Light/Dark/Wireframe,
+compared mode-by-mode against design-data's own per-mode values):
+
+```bash
+design-data figma diff --snapshot figma-vars.json --format json
+```
+
+### primer
+
+Emit a structural overview of the dataset — useful as context at the start of an agent session.
+
+```bash
+design-data primer packages/design-data/tokens
+design-data primer packages/design-data/tokens --format json
+```
+
+### component
+
+Return the full component declaration for a given component identifier.
+
+```bash
+design-data component button
+design-data component action-bar
+```
+
+### write
+
+Create or update a `product-context.json` document for a product-layer working copy.
+
+```bash
+design-data write -o product-context.json -r "Customizing accent color for brand"
+```
+
+## Validation model
+
+Validation runs in two layers:
+
+* **Layer 1 — Structural** (`core/src/validate/structural.rs`): JSON Schema validation against the spec schemas in `packages/design-data-spec/`.
+* **Layer 2 — Relational** (`core/src/validate/relational.rs`): Graph-based catalog rules that check cross-token relationships (alias targets, cascade completeness, naming conventions, accessibility declarations, etc.).
+
+Relational rules have stable `SPEC-NNN` IDs and live in [`core/src/validate/rules/`](core/src/validate/rules/). Each file is self-documenting via inline doc comments.
+
+## Development
+
+### Tasks (via moonrepo)
+
+| Command                | What it does                                                  |
+| ---------------------- | ------------------------------------------------------------- |
+| `moon run sdk:build`   | `cargo build --workspace` (after codegen check)               |
+| `moon run sdk:test`    | `cargo test --workspace` (after codegen check)                |
+| `moon run sdk:lint`    | `cargo clippy --workspace -- -D warnings`                     |
+| `moon run sdk:codegen` | Regenerate `core/src/registry_data.rs` from registry JSON     |
+| `moon run sdk:version` | Sync npm version → `tui/Cargo.toml` after `changeset version` |
+
+### Codegen
+
+`core/src/registry_data.rs` is generated from `packages/design-data/registry/*.json` and spec field definitions. Never edit it by hand. CI runs `codegen-check` to detect drift; fix locally with `moon run sdk:codegen`.
+
+### Integration tests
+
+Integration tests live in `sdk/cli/tests/` and use [`assert_cmd`](https://docs.rs/assert_cmd) to exercise the binary end-to-end.
+
+### Figma and DTCG plugin crates
+
+The Figma Variables bridge and DTCG format support live in their own crates — `design-data-figma` (`plugins/figma/`) and `design-data-dtcg` (`plugins/dtcg/`) — rather than as feature-gated modules inside `design-data-core`. `design-data-cli` depends on both unconditionally. Library consumers that only need `design-data-core` (token resolution, validation, caching, etc.) don't pull in either crate's dependencies (e.g. `reqwest`/`tokio` for Figma) unless they add the plugin crate themselves.
+
+## Versioning
+
+Versions are managed via [changesets](https://github.com/changesets/changesets) at the repo root. Run `pnpm run version` (which chains `changeset version && moon run :version`) so the npm bump and the Rust crate versions stay in sync. The explicit `run` is required — bare `pnpm version` invokes pnpm's built-in version command and skips the script. `moon run sdk:version` (`scripts/sync-cargo-version.mjs`) mirrors the npm version from `tui/package.json` into `tui/Cargo.toml`.
+
+### Native CLI delivery
+
+The `design-data-cli` Rust binary is released via **GitHub Releases** (tagged `design-data-cli@x.y.z`). The release workflow builds it for four platforms on every version-PR merge and attaches the binaries to the release, then opens a PR that bumps `Formula/design-data.rb`.
+
+Platform teams install through Homebrew (macOS) for now:
+
+```sh
+brew tap adobe/spectrum-design-data https://github.com/adobe/spectrum-design-data
+brew install adobe/spectrum-design-data/design-data
+```
+
+There is no npm wrapper for the CLI or TUI, and the crates aren't published to crates.io. Native installers for other operating systems are future work. The WASM package (`@adobe/design-data-wasm`) keeps publishing to npm.
+
+The `@adobe/design-data` npm package is now the **JS/wasm library** (`tools/design-data`), not the CLI launcher. It exposes `loadDataset`, `validateDataset`, session helpers, and write utilities via `@adobe/design-data-wasm` under the hood. The `design-data-cli` Cargo.toml version is managed independently; bump it manually before a native release and add a matching changeset for the changelog.

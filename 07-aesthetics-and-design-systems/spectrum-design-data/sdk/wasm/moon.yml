@@ -1,0 +1,128 @@
+# Copyright 2026 Adobe. All rights reserved.
+# This file is licensed to you under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License. You may obtain a copy
+# of the License at http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software distributed under
+# the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+# OF ANY KIND, either express or implied. See the License for the specific language
+# governing permissions and limitations under the License.
+$schema: "https://moonrepo.dev/schemas/project.json"
+layer: library
+language: rust
+fileGroups:
+  sources:
+    - "src/**/*.rs"
+    - "Cargo.toml"
+    - "build.rs"
+tasks:
+  # Build the .redb embedded cache blob from the canonical token source.
+  # Uses packages/design-data/tokens (cascade array-format with inline name objects)
+  # so that query/resolve against name fields (property, component, state, colorScheme)
+  # work correctly. Runs automatically as a dep of `build`.
+  cache-build:
+    command: bash
+    args:
+      - -c
+      - >-
+        cargo run -p design-data-cli --
+        cache-build "$MOON_WORKSPACE_ROOT/packages/design-data/tokens"
+        --output "$MOON_WORKSPACE_ROOT/sdk/wasm/src/embedded_cache.redb"
+        --mode-sets-path "$MOON_WORKSPACE_ROOT/packages/design-data/mode-sets"
+        --components-path "$MOON_WORKSPACE_ROOT/packages/design-data/components"
+        --fields-path "$MOON_WORKSPACE_ROOT/packages/design-data/fields"
+    inputs:
+      - "/packages/design-data/tokens/*.tokens.json"
+      - "/packages/design-data/mode-sets/*.json"
+      - "/packages/design-data/components/*.json"
+      - "/packages/design-data/fields/*.json"
+    outputs:
+      - "src/embedded_cache.redb"
+    deps:
+      - sdk:codegen-check
+    toolchain: "system"
+
+  # Build the wasm package for both nodejs and web targets with the `embedded` feature.
+  # Outputs:
+  #   pkg/node/ — synchronous nodejs target (no init() required)
+  #   pkg/web/  — browser ESM target (requires await init(wasmUrl))
+  # cache-build runs first to generate src/embedded_cache.redb so Dataset.embedded() works.
+  #
+  # Uses platform: system (bash) so we can prepend $HOME/.cargo/bin to PATH before invoking
+  # node scripts/build.mjs. This ensures wasm-pack finds rustup's rustc proxy rather than a
+  # Homebrew-managed rustc that lacks the wasm32-unknown-unknown target. CI is unaffected:
+  # dtolnay/rust-toolchain already places rustup's rustc first.
+  build:
+    command: bash
+    args:
+      - -c
+      - 'export PATH="$HOME/.cargo/bin:$PATH" && node scripts/build.mjs'
+    inputs:
+      - "@globs(sources)"
+      - "/sdk/core/src/**/*.rs"
+      - "/sdk/core/Cargo.toml"
+      - "/sdk/core/build.rs"
+      - "/sdk/core/src/text-metrics/*"
+      - "/sdk/core/src/registry_data.rs"
+      - "/packages/design-data/guidelines/*.json"
+      - "/packages/design-data/relationships/*.json"
+      - "/packages/design-data/icons/*.json"
+      - "src/embedded_cache.redb"
+      - "scripts/build.mjs"
+    outputs:
+      - "pkg/node/design_data_wasm.js"
+      - "pkg/node/design_data_wasm.d.ts"
+      - "pkg/node/design_data_wasm_bg.wasm"
+      - "pkg/node/design_data_wasm_bg.wasm.d.ts"
+      - "pkg/node/package.json"
+      - "pkg/node/README.md"
+      - "pkg/node/LICENSE"
+      - "pkg/web/design_data_wasm.js"
+      - "pkg/web/design_data_wasm.d.ts"
+      - "pkg/web/design_data_wasm_bg.wasm"
+      - "pkg/web/design_data_wasm_bg.wasm.d.ts"
+      - "pkg/web/package.json"
+      - "pkg/web/README.md"
+      - "pkg/web/LICENSE"
+    deps:
+      - sdk:codegen-check
+      - cache-build
+    toolchain: "system"
+
+  # Run AVA parity tests against the compiled nodejs wasm package.
+  test:
+    command: [pnpm, ava, test]
+    inputs:
+      - "test/**/*.test.js"
+      - "test/helpers/*.js"
+      - "/sdk/core/src/text-metrics/*"
+      - "ava.config.js"
+      - "scripts/verify-package.mjs"
+      - "package.json"
+      - "pkg/node/design_data_wasm.js"
+      - "pkg/node/design_data_wasm_bg.wasm"
+      - "/packages/design-data-spec/conformance/**/*"
+      - "/packages/design-data/components/*.json"
+      - "/sdk/plugins/site/assets/*.js"
+      - "/sdk/core/tests/fixtures/*.json"
+      - "pkg/web/**/*"
+    deps:
+      - build
+
+  ci:
+    deps:
+      - build
+      - test
+
+  verify-package:
+    command: [node, scripts/verify-package.mjs]
+    deps:
+      - build
+    inputs:
+      - "scripts/verify-package.mjs"
+      - "scripts/build.mjs"
+      - "package.json"
+      - "pkg/**/*"
+    options:
+      cache: false
+      runInCI: false

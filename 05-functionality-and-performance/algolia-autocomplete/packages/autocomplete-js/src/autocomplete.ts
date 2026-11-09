@@ -1,0 +1,501 @@
+import {
+  AutocompleteScopeApi,
+  BaseItem,
+  createAutocomplete,
+} from '@algolia/autocomplete-core';
+import {
+  createRef,
+  debounce,
+  getItemsCount,
+  warn,
+} from '@algolia/autocomplete-shared';
+import htm from 'htm';
+
+import { createAutocompleteDom } from './createAutocompleteDom';
+import { createEffectWrapper } from './createEffectWrapper';
+import { createReactiveWrapper } from './createReactiveWrapper';
+import { getDefaultOptions } from './getDefaultOptions';
+import { getPanelPlacementStyle } from './getPanelPlacementStyle';
+import { renderPanel, renderSearchBox } from './render';
+import {
+  AutocompleteApi,
+  AutocompleteOptions,
+  AutocompletePropGetters,
+  AutocompleteSource,
+  AutocompleteState,
+  VNode,
+} from './types';
+import { userAgents } from './userAgents';
+import { mergeDeep, pickBy, setProperties } from './utils';
+
+let instancesCount = 0;
+
+export function autocomplete<TItem extends BaseItem>(
+  options: AutocompleteOptions<TItem>
+): AutocompleteApi<TItem> {
+  const { runEffect, cleanupEffects, runEffects } = createEffectWrapper();
+  const { reactive, runReactives } = createReactiveWrapper();
+
+  const hasNoResultsSourceTemplateRef = createRef(false);
+  const optionsRef = createRef(options);
+  const onStateChangeRef =
+    createRef<AutocompleteOptions<TItem>['onStateChange']>(undefined);
+  const props = reactive(() => getDefaultOptions(optionsRef.current));
+  const isDetached = reactive(
+    () =>
+      props.value.core.environment.matchMedia(
+        props.value.renderer.detachedMediaQuery
+      ).matches
+  );
+
+  function warnAboutOpenOnFocusInDetachedMode() {
+    // `openOnFocus` isn't resolved to its default at this layer yet (that
+    // happens inside `autocomplete-core`'s `createAutocomplete`), so we
+    // mirror its documented default (`false`) explicitly here rather than
+    // relying on falsiness, or reaching for `getDefaultProps` from
+    // `autocomplete-core` — that function has side effects (it generates
+    // an autocomplete id, builds the full `getSources` pipeline) that make
+    // it unsuitable for just reading one resolved option.
+    const openOnFocus = props.value.core.openOnFocus ?? false;
+
+    warn(
+      !(isDetached.value && !openOnFocus),
+      `\`openOnFocus: false\` can lead to unexpected behavior in detached mode. We recommend using \`openOnFocus: true\` when detached mode is enabled.
+
+See: https://www.algolia.com/doc/ui-libraries/autocomplete/api-reference/autocomplete-js/autocomplete/#param-openonfocus`
+    );
+  }
+
+  warnAboutOpenOnFocusInDetachedMode();
+
+  const autocomplete = reactive(() =>
+    createAutocomplete<TItem>({
+      ...props.value.core,
+      onStateChange(params) {
+        hasNoResultsSourceTemplateRef.current = params.state.collections.some(
+          (collection) =>
+            (collection.source as AutocompleteSource<TItem>).templates.noResults
+        );
+        onStateChangeRef.current?.(params as any);
+        props.value.core.onStateChange?.(params as any);
+      },
+      shouldPanelOpen:
+        optionsRef.current.shouldPanelOpen ||
+        (({ state }) => {
+          if (isDetached.value) {
+            return true;
+          }
+
+          const hasItems = getItemsCount(state) > 0;
+
+          if (!props.value.core.openOnFocus && !state.query) {
+            return hasItems;
+          }
+
+          const hasNoResultsTemplate = Boolean(
+            hasNoResultsSourceTemplateRef.current ||
+              props.value.renderer.renderNoResults
+          );
+
+          return (!hasItems && hasNoResultsTemplate) || hasItems;
+        }),
+      __autocomplete_metadata: {
+        userAgents,
+        options,
+      },
+    })
+  );
+  const lastStateRef = createRef<AutocompleteState<TItem>>({
+    collections: [],
+    completion: null,
+    context: {},
+    isOpen: false,
+    query: '',
+    activeItemId: null,
+    status: 'idle',
+    ...props.value.core.initialState,
+  });
+
+  const propGetters: AutocompletePropGetters<TItem> = {
+    getEnvironmentProps: props.value.renderer.getEnvironmentProps,
+    getFormProps: props.value.renderer.getFormProps,
+    getInputProps: props.value.renderer.getInputProps,
+    getItemProps: props.value.renderer.getItemProps,
+    getLabelProps: props.value.renderer.getLabelProps,
+    getListProps: props.value.renderer.getListProps,
+    getPanelProps: props.value.renderer.getPanelProps,
+    getRootProps: props.value.renderer.getRootProps,
+  };
+  const autocompleteScopeApi: AutocompleteScopeApi<TItem> = {
+    setActiveItemId: autocomplete.value.setActiveItemId,
+    setQuery: autocomplete.value.setQuery,
+    setCollections: autocomplete.value.setCollections,
+    setIsOpen: autocomplete.value.setIsOpen,
+    setStatus: autocomplete.value.setStatus,
+    setContext: autocomplete.value.setContext,
+    refresh: autocomplete.value.refresh,
+    navigator: autocomplete.value.navigator,
+  };
+
+  const html = reactive(() =>
+    htm.bind<VNode>(props.value.renderer.renderer.createElement)
+  );
+
+  const dom = reactive(() =>
+    createAutocompleteDom({
+      autocomplete: autocomplete.value,
+      autocompleteScopeApi,
+      classNames: props.value.renderer.classNames,
+      environment: props.value.core.environment,
+      isDetached: isDetached.value,
+      placeholder: props.value.core.placeholder,
+      propGetters,
+      setIsModalOpen,
+      state: lastStateRef.current,
+      translations: props.value.renderer.translations,
+    })
+  );
+
+  function setPanelPosition() {
+    setProperties(dom.value.panel, {
+      style: isDetached.value
+        ? {}
+        : getPanelPlacementStyle({
+            panelPlacement: props.value.renderer.panelPlacement,
+            container: dom.value.root,
+            form: dom.value.form,
+            panel: dom.value.panel,
+            environment: props.value.core.environment,
+          }),
+    });
+  }
+
+  function scheduleRender(state: AutocompleteState<TItem>) {
+    lastStateRef.current = state;
+
+    const renderProps = {
+      autocomplete: autocomplete.value,
+      autocompleteScopeApi,
+      classNames: props.value.renderer.classNames,
+      components: props.value.renderer.components,
+      container: props.value.renderer.container,
+      html: html.value,
+      dom: dom.value,
+      panelContainer: isDetached.value
+        ? dom.value.detachedContainer
+        : props.value.renderer.panelContainer,
+      propGetters,
+      state: lastStateRef.current,
+      renderer: props.value.renderer.renderer,
+    };
+
+    const render =
+      (!getItemsCount(state) &&
+        !hasNoResultsSourceTemplateRef.current &&
+        props.value.renderer.renderNoResults) ||
+      props.value.renderer.render;
+
+    renderSearchBox(renderProps);
+    renderPanel(render, renderProps);
+    requestAnimationFrame(setPanelPosition);
+  }
+
+  runEffect(() => {
+    const environmentProps = autocomplete.value.getEnvironmentProps({
+      formElement: dom.value.form,
+      panelElement: dom.value.panel,
+      inputElement: dom.value.input,
+    });
+
+    setProperties(props.value.core.environment as any, environmentProps);
+
+    return () => {
+      setProperties(
+        props.value.core.environment as any,
+        Object.keys(environmentProps).reduce((acc, key) => {
+          return {
+            ...acc,
+            [key]: undefined,
+          };
+        }, {})
+      );
+    };
+  });
+
+  runEffect(() => {
+    const panelContainerElement = isDetached.value
+      ? props.value.core.environment.document.body
+      : props.value.renderer.panelContainer;
+    const panelElement = isDetached.value
+      ? dom.value.detachedOverlay
+      : dom.value.panel;
+
+    if (isDetached.value && lastStateRef.current.isOpen) {
+      setIsModalOpen(true);
+    }
+
+    scheduleRender(lastStateRef.current);
+
+    return () => {
+      if (panelContainerElement.contains(panelElement)) {
+        panelContainerElement.removeChild(panelElement);
+        panelContainerElement.classList.remove('aa-Detached');
+      }
+    };
+  });
+
+  runEffect(() => {
+    const containerElement = props.value.renderer.container;
+    containerElement.appendChild(dom.value.root);
+
+    return () => {
+      containerElement.removeChild(dom.value.root);
+    };
+  });
+
+  runEffect(() => {
+    const debouncedRender = debounce<{
+      state: AutocompleteState<TItem>;
+    }>(({ state }) => {
+      scheduleRender(state);
+    }, 0);
+
+    onStateChangeRef.current = ({ state, prevState }) => {
+      if (isDetached.value && prevState.isOpen !== state.isOpen) {
+        setIsModalOpen(state.isOpen);
+      }
+
+      // The outer DOM might have changed since the last time the panel was
+      // positioned. The layout might have shifted vertically for instance.
+      // It's therefore safer to re-calculate the panel position before opening
+      // it again.
+      if (!isDetached.value && state.isOpen && !prevState.isOpen) {
+        setPanelPosition();
+      }
+
+      // We scroll to the top of the panel whenever the query changes (i.e. new
+      // results come in) so that users don't have to.
+      if (state.query !== prevState.query) {
+        const scrollablePanels =
+          props.value.core.environment.document.querySelectorAll(
+            '.aa-Panel--scrollable'
+          );
+        scrollablePanels.forEach((scrollablePanel) => {
+          if (scrollablePanel.scrollTop !== 0) {
+            scrollablePanel.scrollTop = 0;
+          }
+        });
+      }
+
+      debouncedRender({ state });
+    };
+
+    return () => {
+      onStateChangeRef.current = undefined;
+    };
+  });
+
+  runEffect(() => {
+    const onResize = debounce<Event>(() => {
+      const previousIsDetached = isDetached.value;
+      isDetached.value = props.value.core.environment.matchMedia(
+        props.value.renderer.detachedMediaQuery
+      ).matches;
+
+      if (previousIsDetached !== isDetached.value) {
+        warnAboutOpenOnFocusInDetachedMode();
+
+        update({});
+      } else {
+        requestAnimationFrame(setPanelPosition);
+      }
+    }, 20);
+    props.value.core.environment.addEventListener('resize', onResize);
+
+    return () => {
+      props.value.core.environment.removeEventListener('resize', onResize);
+    };
+  });
+
+  runEffect(() => {
+    if (!isDetached.value) {
+      return () => {};
+    }
+
+    function toggleModalClassname(isActive: boolean) {
+      dom.value.detachedContainer.classList.toggle(
+        'aa-DetachedContainer--modal',
+        isActive
+      );
+    }
+
+    function onChange(event: MediaQueryListEvent) {
+      toggleModalClassname(event.matches);
+    }
+
+    const isModalDetachedMql = props.value.core.environment.matchMedia(
+      getComputedStyle(
+        props.value.core.environment.document.documentElement
+      ).getPropertyValue('--aa-detached-modal-media-query')
+    );
+
+    toggleModalClassname(isModalDetachedMql.matches);
+
+    // Prior to Safari 14, `MediaQueryList` isn't based on `EventTarget`,
+    // so we must use `addListener` and `removeListener` to observe media query lists.
+    // See https://developer.mozilla.org/en-US/docs/Web/API/MediaQueryList/addListener
+    const hasModernEventListener = Boolean(isModalDetachedMql.addEventListener);
+
+    hasModernEventListener
+      ? isModalDetachedMql.addEventListener('change', onChange)
+      : isModalDetachedMql.addListener(onChange);
+
+    return () => {
+      hasModernEventListener
+        ? isModalDetachedMql.removeEventListener('change', onChange)
+        : isModalDetachedMql.removeListener(onChange);
+    };
+  });
+
+  runEffect(() => {
+    if (!isDetached.value) {
+      return () => {};
+    }
+
+    const container = dom.value.detachedContainer;
+    const input = dom.value.input;
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.defaultPrevented) {
+        return;
+      }
+
+      if (event.key === 'Escape') {
+        // Use the core handler so pending requests are also cancelled.
+        autocomplete.value
+          .getInputProps({ inputElement: input })
+          .onKeyDown(event);
+        return;
+      }
+
+      if (event.key !== 'Tab' || event.ctrlKey || event.metaKey) {
+        return;
+      }
+
+      // Results and custom template controls can change while the modal is open.
+      const elements = Array.from(
+        container.querySelectorAll<HTMLElement>(
+          'a[href], button, input, select, textarea, [tabindex]'
+        )
+      ).filter(
+        (element) =>
+          element.tabIndex >= 0 &&
+          !element.matches(':disabled') &&
+          !element.closest('[hidden]')
+      );
+      const first = elements[0];
+      const last = elements[elements.length - 1];
+      const active = props.value.core.environment.document.activeElement;
+
+      if (!first || (event.shiftKey ? active === first : active === last)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first)?.focus();
+      }
+    }
+
+    container.addEventListener('keydown', onKeyDown);
+    return () => {
+      container.removeEventListener('keydown', onKeyDown);
+    };
+  });
+
+  runEffect(() => {
+    requestAnimationFrame(setPanelPosition);
+
+    return () => {};
+  });
+
+  function destroy() {
+    instancesCount--;
+    cleanupEffects();
+  }
+
+  function update(updatedOptions: Partial<AutocompleteOptions<TItem>> = {}) {
+    cleanupEffects();
+
+    const { components, ...rendererProps } = props.value.renderer;
+
+    optionsRef.current = mergeDeep(
+      rendererProps,
+      props.value.core,
+      {
+        // We need to filter out default components so they can be replaced with
+        // a new `renderer`, without getting rid of user components.
+        // @MAJOR Deal with registering components with the same name as the
+        // default ones. If we disallow overriding default components, we'd just
+        // need to pass all `components` here.
+        components: pickBy(
+          components,
+          ({ value }) => !value.hasOwnProperty('__autocomplete_componentName')
+        ),
+        initialState: lastStateRef.current,
+      },
+      updatedOptions
+    );
+
+    runReactives();
+    runEffects();
+
+    autocomplete.value.refresh().then(() => {
+      scheduleRender(lastStateRef.current);
+    });
+  }
+
+  function setIsModalOpen(value: boolean) {
+    const prevValue = props.value.core.environment.document.body.contains(
+      dom.value.detachedOverlay
+    );
+
+    if (value === prevValue) {
+      return;
+    }
+
+    if (value) {
+      props.value.core.environment.document.body.appendChild(
+        dom.value.detachedOverlay
+      );
+      props.value.core.environment.document.body.classList.add('aa-Detached');
+      dom.value.input.focus();
+    } else {
+      const shouldRestoreFocus = dom.value.detachedOverlay.contains(
+        props.value.core.environment.document.activeElement
+      );
+
+      props.value.core.environment.document.body.removeChild(
+        dom.value.detachedOverlay
+      );
+      props.value.core.environment.document.body.classList.remove(
+        'aa-Detached'
+      );
+
+      if (shouldRestoreFocus) {
+        dom.value.detachedSearchButton?.focus();
+      }
+    }
+  }
+
+  warn(
+    instancesCount === 0,
+    `Autocomplete doesn't support multiple instances running at the same time. Make sure to destroy the previous instance before creating a new one.
+
+See: https://www.algolia.com/doc/ui-libraries/autocomplete/api-reference/autocomplete-js/autocomplete/#param-destroy`
+  );
+
+  instancesCount++;
+
+  return {
+    ...autocompleteScopeApi,
+    update,
+    destroy,
+  };
+}

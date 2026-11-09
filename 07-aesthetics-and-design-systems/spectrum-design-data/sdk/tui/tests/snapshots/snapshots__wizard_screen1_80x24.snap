@@ -1,0 +1,26 @@
+---
+source: tui/tests/snapshots.rs
+expression: rendered
+---
+▶ test · 0 tokens
+  Spectrum Design Data  v[VERSION]
+  ↑↓ hi┌ Step 1 of 4 — Intent ──────────────────────────────────────────┐
+  ─────│Intent: background-color                                        │───────
+  >    │  These tokens already exist for similar intents.               │
+    que│  Reusing one keeps the cascade healthy.  Tab to alias · Enter t│
+    res│                                                                │
+    des│▶  accent-background-color-default               test.json 50%  │
+    val│                                                                │
+    new│                                                                │
+    nam│                                                                │
+    fin│                                                                │
+    aut│                                                                │
+    qui│                                                                │
+       │                                                                │
+       │                                                                │
+       │                                                                │
+       │                                                                │
+       │                                                                │
+       │                                                                │
+       │Enter: continue  Tab: reuse selected  ↑↓: select suggestion  Esc│
+       └────────────────────────────────────────────────────────────────┘

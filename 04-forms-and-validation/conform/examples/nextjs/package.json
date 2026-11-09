@@ -1,0 +1,36 @@
+{
+	"name": "nextjs-example",
+	"private": true,
+	"scripts": {
+		"dev": "next dev",
+		"build": "next build",
+		"start": "next start",
+		"lint": "eslint",
+		"test": "playwright test"
+	},
+	"dependencies": {
+		"@conform-to/react": "1.21.3",
+		"@conform-to/zod": "1.21.3",
+		"next": "16.4.1",
+		"react": "19.2.7",
+		"react-dom": "19.2.7",
+		"zod": "^4.4.3"
+	},
+	"devDependencies": {
+		"@playwright/test": "^1.62.1",
+		"@types/node": "^20",
+		"@types/react": "^19",
+		"@types/react-dom": "^19",
+		"eslint": "^9",
+		"eslint-config-next": "16.2.10",
+		"typescript": "^5"
+	},
+	"dependenciesMeta": {
+		"@conform-to/react": {
+			"injected": true
+		},
+		"@conform-to/zod": {
+			"injected": true
+		}
+	}
+}

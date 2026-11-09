@@ -1,0 +1,55 @@
+{
+  "name": "@adobe/design-data",
+  "version": "3.3.7",
+  "description": "Node.js helpers for @adobe/design-data-wasm: filesystem dataset loading, token write operations, and authoring-session management",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./load": "./src/load.js",
+    "./write": "./src/write.js",
+    "./session": "./src/session.js",
+    "./validate": "./src/validate.js",
+    "./guideline": "./src/guideline.js",
+    "./component": "./src/component.js"
+  },
+  "files": [
+    "src/",
+    "llms.txt",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20.12.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/adobe/spectrum-design-data.git",
+    "directory": "tools/design-data"
+  },
+  "bugs": {
+    "url": "https://github.com/adobe/spectrum-design-data/issues"
+  },
+  "homepage": "https://github.com/adobe/spectrum-design-data/tree/main/tools/design-data#readme",
+  "keywords": [
+    "spectrum",
+    "design-system",
+    "design-tokens",
+    "wasm"
+  ],
+  "author": "Adobe",
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/",
+    "provenance": true
+  },
+  "dependencies": {
+    "@adobe/design-data-spec": "workspace:*",
+    "@adobe/design-data-wasm": "workspace:*",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1"
+  },
+  "devDependencies": {
+    "ava": "^6.1.2"
+  }
+}

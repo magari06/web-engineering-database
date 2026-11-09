@@ -1,0 +1,9 @@
+lint-staged
+
+grep -r "\.only(" test/e2e \
+  && echo "ERROR: found .only() use in test" && exit 1
+
+grep -r "browser\.debug(" test/e2e \
+  && echo "ERROR: found browser.debug() use in test" && exit 1
+
+exit 0

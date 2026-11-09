@@ -1,0 +1,37 @@
+<div role="alert" aria-selected="true" id="fail1"></div>
+<div role="link" aria-selected="true" id="fail2"></div>
+<div role="row" aria-colcount="value" id="fail3"></div>
+<div role="row" aria-rowcount="value" id="fail4"></div>
+
+<audio
+  src="/test/assets/moon-speech.mp3"
+  controls
+  aria-orientation="horizontal"
+  id="fail5"
+></audio>
+
+<div id="fail6" role="combobox" aria-multiline="false"></div>
+<div id="fail7" role="combobox" aria-multiline="true" contenteditable></div>
+<div id="fail8" role="combobox" aria-multiline="true"></div>
+
+<br aria-busy="true" id="fail9" />
+<wbr aria-busy="true" id="fail10" />
+
+<testutils-element id="fail11" aria-valuetext="value"></testutils-element>
+
+<!-- deprecated attr combined with an unallowed attr fails rather than incompletes -->
+<div role="button" id="fail12" aria-grabbed="true" aria-level="2"></div>
+
+<div role="checkbox" id="fail13" aria-checked="TRUE">Checkbox</div>
+<div role="checkbox" id="fail14" aria-checked="FALSE">Checkbox</div>
+<button id="fail15" aria-pressed="FALSE">Toggle</button>
+<a href="#" id="fail16" aria-current="FALSE">Current page</a>
+<div role="checkbox" id="fail17" aria-checked="TRUE" aria-busy="FALSE">
+  Checkbox
+</div>
+<div
+  role="checkbox"
+  id="fail18"
+  aria-required="FALSE"
+  aria-readonly="FALSE"
+></div>

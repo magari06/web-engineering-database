@@ -1,0 +1,241 @@
+// Copyright 2026 Adobe. All rights reserved.
+// This file is licensed to you under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License. You may obtain a copy
+// of the License at http://www.apache.org/licenses/LICENSE-2.0
+
+// Unless required by applicable law or agreed to in writing, software distributed under
+// the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+// OF ANY KIND, either express or implied. See the License for the specific language
+// governing permissions and limitations under the License.
+
+import { readFileSync, readdirSync } from "fs";
+import { resolve, join, dirname } from "path";
+import { fileURLToPath } from "url";
+import { loadFieldCatalog } from "./field-catalog.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = resolve(__dirname, "../../..");
+const COMPONENTS_DIR = resolve(REPO_ROOT, "packages/design-data/components");
+
+/**
+ * Load each component's declared anatomy parts (component.json `anatomy[].name`).
+ * Used by the space-between endpoint resolver (mirrors SPEC-047's `declared_parts`,
+ * sdk/core/src/validate/rules/spec047.rs) — a component-declared anatomy part is a
+ * valid gap endpoint even when it isn't in the generic anatomy-terms registry.
+ *
+ * @returns {Map<string, Set<string>>} component name -> set of declared part names
+ */
+function loadComponentAnatomy(componentsDir = COMPONENTS_DIR) {
+  const componentAnatomy = new Map();
+  for (const filename of readdirSync(componentsDir)) {
+    if (!filename.endsWith(".json")) continue;
+    const data = JSON.parse(
+      readFileSync(resolve(componentsDir, filename), "utf-8"),
+    );
+    if (!data.name || !Array.isArray(data.anatomy)) continue;
+    componentAnatomy.set(
+      data.name,
+      new Set(data.anatomy.map((part) => part.name).filter(Boolean)),
+    );
+  }
+  return componentAnatomy;
+}
+
+/**
+ * Load all registries into a unified index.
+ * Registry files are resolved from the field catalog declarations rather than
+ * a hardcoded mapping.
+ *
+ * Returns { byField, terms, tokenNameMap, serializationOrder, allFields, componentAnatomy, anatomyStandaloneScope } where:
+ * - byField[fieldName] = Set of known ids
+ * - terms = sorted list of { segments: string[], field: string, id: string }
+ *   for greedy longest-match parsing
+ * - tokenNameMap = id -> tokenName for serialization
+ * - serializationOrder = field names ordered by serialization.position
+ * - allFields = Map of all field declarations from the catalog
+ * - componentAnatomy = Map of component name -> Set of declared anatomy part names
+ * - anatomyStandaloneScope = Set of anatomy-terms ids flagged `standaloneScope: true`
+ *   (mirrors sdk/core/src/registry.rs `parse_standalone_scope_ids` — SPEC-025 lets these
+ *   scope a token name object without a component or structure)
+ */
+export function loadRegistries() {
+  const { registryFiles, serializationOrder, allFields } = loadFieldCatalog();
+  const componentAnatomy = loadComponentAnatomy();
+
+  const byField = {};
+  const allTerms = [];
+  const tokenNameMap = {}; // id -> tokenName for serialization
+  const anatomyStandaloneScope = new Set();
+
+  for (const [field, filePath] of Object.entries(registryFiles)) {
+    const data = JSON.parse(readFileSync(filePath, "utf-8"));
+    const ids = new Set();
+
+    for (const entry of data.values) {
+      ids.add(entry.id);
+      if (field === "anatomy" && entry.standaloneScope) {
+        anatomyStandaloneScope.add(entry.id);
+      }
+      const segments = entry.id.split("-");
+      allTerms.push({ segments, field, id: entry.id });
+
+      // Track tokenName for legacy serialization, and also index it for
+      // matching: some fields (e.g. icon) serialize to a longer legacy form
+      // ("checkmark" -> "checkmark-icon") that must be recognized as a whole
+      // during decompose, not split into its own segments (which can collide
+      // with unrelated single-segment terms in other registries).
+      if (entry.tokenName) {
+        tokenNameMap[entry.id] = entry.tokenName;
+        allTerms.push({
+          segments: entry.tokenName.split("-"),
+          field,
+          id: entry.id,
+        });
+      }
+
+      // Also index aliases for matching
+      if (entry.aliases) {
+        for (const alias of entry.aliases) {
+          const aliasId = alias.toLowerCase().replace(/\s+/g, "-");
+          ids.add(aliasId);
+          allTerms.push({ segments: aliasId.split("-"), field, id: entry.id });
+        }
+      }
+    }
+
+    byField[field] = ids;
+  }
+
+  // Sort by segment count descending for greedy longest-match
+  allTerms.sort((a, b) => b.segments.length - a.segments.length);
+
+  return {
+    byField,
+    terms: allTerms,
+    tokenNameMap,
+    serializationOrder,
+    allFields,
+    componentAnatomy,
+    anatomyStandaloneScope,
+  };
+}
+
+/**
+ * Try to match the longest registry term starting at a given position
+ * in a list of name segments.
+ *
+ * @param {string[]} segments - kebab-split token name segments
+ * @param {number} startIndex - position to start matching from
+ * @param {Array} terms - sorted term list from loadRegistries
+ * @param {string|null} preferField - prefer matches of this field type
+ * @returns {{ field: string, id: string, length: number } | null}
+ */
+export function matchLongestTerm(
+  segments,
+  startIndex,
+  terms,
+  preferField = null,
+) {
+  const remaining = segments.length - startIndex;
+  let bestMatch = null;
+
+  for (const term of terms) {
+    if (term.segments.length > remaining) continue;
+
+    let matches = true;
+    for (let i = 0; i < term.segments.length; i++) {
+      if (segments[startIndex + i] !== term.segments[i]) {
+        matches = false;
+        break;
+      }
+    }
+
+    if (matches) {
+      if (!bestMatch || term.segments.length > bestMatch.length) {
+        bestMatch = {
+          field: term.field,
+          id: term.id,
+          length: term.segments.length,
+        };
+      } else if (
+        term.segments.length === bestMatch.length &&
+        preferField &&
+        term.field === preferField
+      ) {
+        bestMatch = {
+          field: term.field,
+          id: term.id,
+          length: term.segments.length,
+        };
+      }
+    }
+  }
+
+  return bestMatch;
+}
+
+/**
+ * uuid -> token/CTR, covering both cascade tokens (tokens/*.tokens.json) and
+ * value-owning CTRs (relationships/*.json) — both carry `lifecycle`, and a
+ * `lifecycle.replacedBy` chain can terminate at either kind. Used wherever
+ * `resolveReplacementUuid` needs to look up a replacement target; a map built
+ * from tokens alone misses relationship-only replacement targets and silently
+ * breaks the chain.
+ *
+ * @param {string} tokensDir - directory of tokens/*.tokens.json
+ * @param {string} relationshipsDir - directory of relationships/*.json
+ * @returns {Map<string, object>}
+ */
+export function buildUuidToTokenIndex(tokensDir, relationshipsDir) {
+  const uuidToToken = new Map();
+  for (const file of readdirSync(tokensDir).filter((f) =>
+    f.endsWith(".json"),
+  )) {
+    for (const token of JSON.parse(
+      readFileSync(join(tokensDir, file), "utf-8"),
+    )) {
+      if (token.uuid) uuidToToken.set(token.uuid, token);
+    }
+  }
+  for (const file of readdirSync(relationshipsDir).filter((f) =>
+    f.endsWith(".json"),
+  )) {
+    for (const entry of JSON.parse(
+      readFileSync(join(relationshipsDir, file), "utf-8"),
+    )) {
+      if (entry?.uuid) uuidToToken.set(entry.uuid, entry);
+    }
+  }
+  return uuidToToken;
+}
+
+/**
+ * Find all possible matches for a given set of segments at a position.
+ * Returns all matches (not just longest) for disambiguation.
+ */
+export function findAllMatches(segments, startIndex, terms) {
+  const remaining = segments.length - startIndex;
+  const matches = [];
+
+  for (const term of terms) {
+    if (term.segments.length > remaining) continue;
+
+    let isMatch = true;
+    for (let i = 0; i < term.segments.length; i++) {
+      if (segments[startIndex + i] !== term.segments[i]) {
+        isMatch = false;
+        break;
+      }
+    }
+
+    if (isMatch) {
+      matches.push({
+        field: term.field,
+        id: term.id,
+        length: term.segments.length,
+      });
+    }
+  }
+
+  return matches;
+}

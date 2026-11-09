@@ -1,0 +1,28 @@
+---
+source: tui/tests/snapshots.rs
+assertion_line: 76
+expression: rendered
+---
+▶ test · 0 tokens
+┌ Query: property=* ───────────────────────────────────────────────────────────┐
+│Name                         Value                    File            Layer   │
+│accent-background-color-defa red                      test.json       foundati│
+│neutral-background-color-def red                      test.json       foundati│
+│positive-background-color-de red                      test.json       foundati│
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+j/k navigate · g/G top/bottom · y yank · Esc back
+3 token(s) matched

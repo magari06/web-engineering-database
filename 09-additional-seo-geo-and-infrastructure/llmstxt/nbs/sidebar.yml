@@ -1,0 +1,18 @@
+website:
+  sidebar:
+    contents:
+      - index.qmd
+      - changes.qmd
+      - section: Code
+        contents:
+          - 00_intro.ipynb
+          - 01_core.ipynb
+          - text: JavaScript
+            href: llmstxt-js.html
+      - section: Editors and IDEs
+        contents:
+          - ed.qmd
+      - section: Tutorials
+        contents:
+          - domains.qmd
+          - nbdev.qmd

@@ -1,0 +1,2219 @@
+// Copyright 2026 Adobe. All rights reserved.
+// This file is licensed to you under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License. You may obtain a copy
+// of the License at http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under
+// the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+// OF ANY KIND, either express or implied. See the License for the specific language
+// governing permissions and limitations under the License.
+
+//! Design Data core library — validation, resolution, and tooling.
+
+pub mod anatomy_suggest;
+pub mod authoring;
+#[cfg(feature = "cache")]
+pub mod cache;
+pub mod cascade;
+pub mod changelog;
+pub mod compat;
+pub mod component;
+pub mod constraints;
+pub mod data_source;
+pub mod derived;
+pub mod diff;
+pub mod discovery;
+pub mod export;
+pub mod graph;
+pub mod legacy;
+pub mod manifest;
+pub mod migrate;
+pub mod naming;
+pub mod primer;
+pub mod query;
+pub mod record_diff;
+pub mod registry;
+pub mod report;
+pub mod schema;
+pub mod suggest;
+pub mod text_metrics;
+pub mod validate;
+pub mod visual;
+pub mod visual_compare;
+pub mod write;
+
+use std::path::PathBuf;
+
+/// Errors from schema loading, IO, and JSON parsing.
+#[derive(Debug, thiserror::Error)]
+pub enum CoreError {
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+    #[error(transparent)]
+    Referencing(#[from] jsonschema::ReferencingError),
+    #[error("JSON Schema compile: {0}")]
+    SchemaBuild(String),
+    #[error("schema file is missing $id: {0}")]
+    MissingSchemaId(PathBuf),
+    #[error("expected token schema directory at {0}")]
+    SchemaDirectoryMissing(PathBuf),
+    #[error(
+        "token property '{0}' has tokens across multiple mode sets and cannot be represented \
+         in legacy set format; convert individual mode-set slices separately"
+    )]
+    MultiModeSetToken(String),
+    #[error("query parse error: {0}")]
+    QueryParse(String),
+    #[error("parse error: {0}")]
+    ParseError(String),
+}
+
+/// Returns the crate name for sanity checks and CLI `--version` wiring later.
+pub fn crate_name() -> &'static str {
+    env!("CARGO_PKG_NAME")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::*;
+    use crate::schema::SchemaRegistry;
+    use crate::validate::structural::validate_structural;
+
+    #[test]
+    fn validate_module_reports_ready() {
+        assert!(validate::engine_ready());
+    }
+
+    #[test]
+    fn crate_name_is_set() {
+        assert_eq!(crate_name(), "design-data-core");
+    }
+
+    #[test]
+    fn structural_validates_spectrum_token_sources() {
+        let schemas =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/design-data-spec/schemas");
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/tokens/src");
+        let registry = SchemaRegistry::load_legacy_token_schemas(&schemas).expect("schemas load");
+        let report = validate_structural(&src, &registry).expect("validate");
+        assert!(report.errors.is_empty(), "{report:?}");
+    }
+}
+
+#[cfg(test)]
+mod relational_conformance {
+    use std::path::PathBuf;
+
+    use serde_json::json;
+
+    use crate::graph::{ModeSetRecord, TokenGraph};
+    use crate::validate::relational::diagnostics_for_rule;
+
+    #[test]
+    fn spec001_alias_target_missing() {
+        let g = TokenGraph::from_pairs(vec![(
+            "missing-alias".into(),
+            PathBuf::from("fixture.json"),
+            json!({
+                "name": {"property": "alias-missing-target"},
+                "$ref": "tokens/nonexistent-token.json"
+            }),
+        )]);
+        assert!(!diagnostics_for_rule(&g, "SPEC-001").is_empty());
+    }
+
+    #[test]
+    fn spec002_spacing_alias_to_color() {
+        let g = TokenGraph::from_pairs(vec![
+            (
+                "spacing-alias".into(),
+                PathBuf::from("a.json"),
+                json!({
+                    "name": {"property": "spacing-alias"},
+                    "$ref": "token-color.json",
+                    "uuid": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+                }),
+            ),
+            (
+                "token-color".into(),
+                PathBuf::from("b.json"),
+                json!({
+                    "$schema": "https://opensource.adobe.com/spectrum-design-data/schemas/token-types/color.json",
+                    "name": {"property": "base-color"},
+                    "value": "rgb(0, 128, 255)",
+                    "uuid": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+                }),
+            ),
+        ]);
+        assert!(!diagnostics_for_rule(&g, "SPEC-002").is_empty());
+    }
+
+    #[test]
+    fn spec003_alias_cycle() {
+        let g = TokenGraph::from_pairs(vec![
+            (
+                "token-a".into(),
+                PathBuf::from("ta.json"),
+                json!({
+                    "name": {"property": "cycle-a"},
+                    "$ref": "token-b.json",
+                    "uuid": "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+                }),
+            ),
+            (
+                "token-b".into(),
+                PathBuf::from("tb.json"),
+                json!({
+                    "name": {"property": "cycle-b"},
+                    "$ref": "token-a.json",
+                    "uuid": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+                }),
+            ),
+        ]);
+        assert!(!diagnostics_for_rule(&g, "SPEC-003").is_empty());
+    }
+
+    #[test]
+    fn spec004_duplicate_uuid() {
+        let g = TokenGraph::from_pairs(vec![
+            (
+                "a".into(),
+                PathBuf::from("x.json"),
+                json!({"uuid": "11111111-1111-1111-1111-111111111111", "value": "1"}),
+            ),
+            (
+                "b".into(),
+                PathBuf::from("y.json"),
+                json!({"uuid": "11111111-1111-1111-1111-111111111111", "value": "2"}),
+            ),
+        ]);
+        assert!(!diagnostics_for_rule(&g, "SPEC-004").is_empty());
+    }
+
+    #[test]
+    fn spec005_mode_set_default_not_in_modes() {
+        let g = TokenGraph::default().with_mode_sets(vec![ModeSetRecord {
+            file: PathBuf::from("mode-set.json"),
+            name: "scale".into(),
+            modes: vec!["medium".into(), "large".into()],
+            default_mode: "xlarge".into(),
+        }]);
+        assert!(!diagnostics_for_rule(&g, "SPEC-005").is_empty());
+    }
+
+    /// A manifest-declared mode set (`extensions.modeSets`) is validated by SPEC-005
+    /// the same as a foundation one — the rule just walks `graph.mode_sets`
+    /// regardless of how a record got there.
+    #[test]
+    fn spec005_catches_manifest_declared_mode_set_bad_default() {
+        let mut g = TokenGraph::default();
+        let manifest = json!({
+            "specVersion": "1.0.0-draft",
+            "foundationVersion": "1.0.0",
+            "extensions": {
+                "modeSets": [
+                    {"name": "interfaceLevel", "modes": ["base", "elevated"], "default": "raised"}
+                ]
+            }
+        });
+        g.apply_platform_manifest(&manifest).unwrap();
+        assert!(!diagnostics_for_rule(&g, "SPEC-005").is_empty());
+    }
+
+    /// Regression for P1 Bug 1: duplicate UUIDs in a cascade file must be detected
+    /// by SPEC-004, not silently dropped during graph construction.
+    #[test]
+    fn spec004_cascade_duplicate_uuid_not_dropped() {
+        use std::io::Write;
+        use tempfile::TempDir;
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("tokens.tokens.json");
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(
+            f,
+            r#"[
+              {{"name":{{"property":"a"}},"value":"1","uuid":"dup-uuid-0000-0000-0000-000000000001"}},
+              {{"name":{{"property":"b"}},"value":"2","uuid":"dup-uuid-0000-0000-0000-000000000001"}}
+            ]"#
+        )
+        .unwrap();
+        let g = TokenGraph::from_json_dir(dir.path()).unwrap();
+        // Both tokens must be in the graph (different keys despite same UUID).
+        let matching: Vec<_> = g
+            .tokens
+            .values()
+            .filter(|t| t.uuid.as_deref() == Some("dup-uuid-0000-0000-0000-000000000001"))
+            .collect();
+        assert_eq!(
+            matching.len(),
+            2,
+            "both tokens with duplicate UUID must be in the graph"
+        );
+        // SPEC-004 must fire.
+        assert!(!diagnostics_for_rule(&g, "SPEC-004").is_empty());
+    }
+
+    /// Regression for P1 Bug 2: cascade tokens with duplicate name objects (no UUID)
+    /// must both be in the graph so SPEC-006 can detect the ambiguity.
+    #[test]
+    fn spec006_cascade_duplicate_name_object_not_dropped() {
+        use std::io::Write;
+        use tempfile::TempDir;
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("tokens.tokens.json");
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(
+            f,
+            r#"[
+              {{"name":{{"property":"bg"}},"value":"white"}},
+              {{"name":{{"property":"bg"}},"value":"offwhite"}}
+            ]"#
+        )
+        .unwrap();
+        let g = TokenGraph::from_json_dir(dir.path()).unwrap();
+        assert_eq!(
+            g.tokens.len(),
+            2,
+            "both tokens with duplicate name must be in the graph"
+        );
+        assert!(!diagnostics_for_rule(&g, "SPEC-006").is_empty());
+    }
+
+    #[test]
+    fn spec008_cascade_completeness_warning() {
+        let g = TokenGraph::from_pairs(vec![(
+            "dark-only".into(),
+            PathBuf::from("a.json"),
+            json!({"name": {"property": "bg", "colorScheme": "dark"}, "value": "#000"}),
+        )])
+        .with_mode_sets(vec![ModeSetRecord {
+            file: PathBuf::from("d.json"),
+            name: "colorScheme".into(),
+            modes: vec!["light".into(), "dark".into()],
+            default_mode: "light".into(),
+        }]);
+        assert!(!diagnostics_for_rule(&g, "SPEC-008").is_empty());
+    }
+
+    #[test]
+    fn spec006_duplicate_name_object() {
+        let name = json!({"property": "ambiguous", "colorScheme": "dark"});
+        let g = TokenGraph::from_pairs(vec![
+            (
+                "t1".into(),
+                PathBuf::from("1.json"),
+                json!({
+                    "name": name.clone(),
+                    "value": "rgb(10, 10, 10)",
+                    "uuid": "ffffffff-ffff-4fff-8fff-ffffffffffff"
+                }),
+            ),
+            (
+                "t2".into(),
+                PathBuf::from("2.json"),
+                json!({
+                    "name": name,
+                    "value": "rgb(20, 20, 20)",
+                    "uuid": "11111111-1111-4111-8111-111111111111"
+                }),
+            ),
+        ]);
+        assert!(!diagnostics_for_rule(&g, "SPEC-006").is_empty());
+    }
+
+    #[test]
+    fn spec010_replaced_by_target_not_found() {
+        let g = TokenGraph::from_pairs(vec![(
+            "dep".into(),
+            PathBuf::from("t.json"),
+            json!({
+                "name": {"property": "old"},
+                "uuid": "aaaaaaaa-0001-4000-8000-000000000001",
+                "lifecycle": {
+                    "deprecatedIn": "3.0.0",
+                    "replacedBy": "bbbbbbbb-9999-4000-8000-000000000099"
+                },
+                "value": "#fff"
+            }),
+        )]);
+        assert!(!diagnostics_for_rule(&g, "SPEC-010").is_empty());
+    }
+
+    #[test]
+    fn spec010_replaced_by_target_exists_no_error() {
+        let g = TokenGraph::from_pairs(vec![
+            (
+                "dep".into(),
+                PathBuf::from("t.json"),
+                json!({
+                    "name": {"property": "old"},
+                    "uuid": "aaaaaaaa-0001-4000-8000-000000000001",
+                    "lifecycle": {
+                        "deprecatedIn": "3.0.0",
+                        "replacedBy": "aaaaaaaa-0002-4000-8000-000000000001"
+                    },
+                    "value": "#fff"
+                }),
+            ),
+            (
+                "new".into(),
+                PathBuf::from("t.json"),
+                json!({
+                    "name": {"property": "new"},
+                    "uuid": "aaaaaaaa-0002-4000-8000-000000000001",
+                    "value": "#000"
+                }),
+            ),
+        ]);
+        assert!(diagnostics_for_rule(&g, "SPEC-010").is_empty());
+    }
+
+    #[test]
+    fn spec011_replaced_by_array_missing_comment() {
+        let g = TokenGraph::from_pairs(vec![(
+            "split".into(),
+            PathBuf::from("t.json"),
+            json!({
+                "name": {"property": "split"},
+                "uuid": "aaaaaaaa-0001-4000-8000-000000000001",
+                "lifecycle": {
+                    "deprecatedIn": "3.0.0",
+                    "replacedBy": ["aaaaaaaa-0002-4000-8000-000000000001"]
+                },
+                "value": "#fff"
+            }),
+        )]);
+        assert!(!diagnostics_for_rule(&g, "SPEC-011").is_empty());
+    }
+
+    #[test]
+    fn spec012_replaced_by_without_deprecated() {
+        let g = TokenGraph::from_pairs(vec![(
+            "bad".into(),
+            PathBuf::from("t.json"),
+            json!({
+                "name": {"property": "bad"},
+                "uuid": "aaaaaaaa-0001-4000-8000-000000000001",
+                "lifecycle": {"replacedBy": "aaaaaaaa-0002-4000-8000-000000000001"},
+                "value": "#fff"
+            }),
+        )]);
+        assert!(!diagnostics_for_rule(&g, "SPEC-012").is_empty());
+    }
+
+    #[test]
+    fn spec013_planned_removal_without_deprecated() {
+        let g = TokenGraph::from_pairs(vec![(
+            "bad".into(),
+            PathBuf::from("t.json"),
+            json!({
+                "name": {"property": "bad"},
+                "uuid": "aaaaaaaa-0001-4000-8000-000000000001",
+                "lifecycle": {"plannedRemoval": "4.0.0"},
+                "value": "#fff"
+            }),
+        )]);
+        assert!(!diagnostics_for_rule(&g, "SPEC-013").is_empty());
+    }
+
+    #[test]
+    fn spec013_planned_removal_precedes_deprecated() {
+        let g = TokenGraph::from_pairs(vec![(
+            "bad".into(),
+            PathBuf::from("t.json"),
+            json!({
+                "name": {"property": "bad"},
+                "uuid": "aaaaaaaa-0001-4000-8000-000000000001",
+                "lifecycle": {"deprecatedIn": "3.2.0", "plannedRemoval": "3.1.0"},
+                "value": "#fff"
+            }),
+        )]);
+        let diags = diagnostics_for_rule(&g, "SPEC-013");
+        assert!(!diags.is_empty(), "should catch preceding plannedRemoval");
+        assert!(
+            diags[0].message.contains("preceding"),
+            "message should mention version ordering"
+        );
+    }
+
+    #[test]
+    fn spec013_valid_planned_removal_no_error() {
+        let g = TokenGraph::from_pairs(vec![(
+            "ok".into(),
+            PathBuf::from("t.json"),
+            json!({
+                "name": {"property": "ok"},
+                "uuid": "aaaaaaaa-0001-4000-8000-000000000001",
+                "lifecycle": {"deprecatedIn": "3.2.0", "plannedRemoval": "4.0.0"},
+                "value": "#fff"
+            }),
+        )]);
+        assert!(diagnostics_for_rule(&g, "SPEC-013").is_empty());
+    }
+
+    #[test]
+    fn spec013_multi_digit_semver_ordering() {
+        // 3.10.0 > 3.2.0, so this is valid — should not error.
+        let g = TokenGraph::from_pairs(vec![(
+            "ok".into(),
+            PathBuf::from("t.json"),
+            json!({
+                "name": {"property": "ok"},
+                "uuid": "aaaaaaaa-0001-4000-8000-000000000001",
+                "lifecycle": {"deprecatedIn": "3.2.0", "plannedRemoval": "3.10.0"},
+                "value": "#fff"
+            }),
+        )]);
+        assert!(
+            diagnostics_for_rule(&g, "SPEC-013").is_empty(),
+            "3.10.0 > 3.2.0 — should not error"
+        );
+    }
+}
+
+/// Validation conformance tests — fixture-driven, exercises relational rules
+/// against `packages/design-data-spec/conformance/{invalid,valid}/` fixtures.
+///
+/// Each fixture directory contains `dataset.json` (neutral interchange format:
+/// `{ tokens, components, modeSets }`) and `expected-errors.json` (list of
+/// `{ rule_id, severity, message_pattern }` entries). Dirs without `dataset.json`
+/// are legacy-only and skipped until migrated.
+#[cfg(test)]
+mod validation_conformance {
+    use std::collections::HashSet;
+    use std::path::Path;
+
+    use regex::Regex;
+    use serde_json::Value;
+
+    use crate::graph::{ComponentRecord, GuidelineRecord, ModeSetRecord, TokenGraph};
+    use crate::naming::NamingExceptionsFile;
+    use crate::report::Severity;
+    use crate::validate::rules::{default_rules, run_rules};
+
+    fn severity_str(s: &Severity) -> &'static str {
+        match s {
+            Severity::Error => "error",
+            Severity::Warning => "warning",
+            Severity::Info => "info",
+        }
+    }
+
+    fn build_graph(dataset: &Value) -> TokenGraph {
+        use crate::graph::{extract_alias_target, Layer, TokenRecord};
+
+        let tokens_json = dataset
+            .get("tokens")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+
+        let records: Vec<TokenRecord> = tokens_json
+            .into_iter()
+            .enumerate()
+            .map(|(i, raw)| {
+                // For string names use the string directly (SPEC-007 roundtrip checks t.name).
+                // For object names generate a unique key from index.
+                let key = raw
+                    .get("name")
+                    .and_then(|n| n.as_str())
+                    .map(String::from)
+                    .unwrap_or_else(|| format!("token-{i}"));
+                // Optional "$layer" field lets fixtures exercise multi-layer rules (e.g. SPEC-032).
+                let layer = raw
+                    .get("$layer")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(Layer::Foundation);
+                let tok_obj = raw.as_object();
+                let schema_url = tok_obj
+                    .and_then(|o| o.get("$schema"))
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string);
+                let uuid = tok_obj
+                    .and_then(|o| o.get("uuid"))
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string);
+                let alias_target = tok_obj.and_then(extract_alias_target);
+                TokenRecord {
+                    name: key,
+                    file: std::path::PathBuf::from("dataset.json"),
+                    index: i,
+                    schema_url,
+                    uuid,
+                    alias_target,
+                    raw,
+                    layer,
+                }
+            })
+            .collect();
+
+        let mut graph = TokenGraph::from_records(records);
+
+        if let Some(comps) = dataset.get("components").and_then(|v| v.as_array()) {
+            let comp_records: Vec<ComponentRecord> = comps
+                .iter()
+                .filter_map(|v| {
+                    let name = v.get("name")?.as_str()?.to_string();
+                    Some(ComponentRecord {
+                        name,
+                        file: std::path::PathBuf::from("dataset.json"),
+                        raw: v.clone(),
+                        layer: Layer::Foundation,
+                    })
+                })
+                .collect();
+            graph = graph.with_components(comp_records);
+        }
+
+        if let Some(relationships) = dataset.get("relationships").and_then(|v| v.as_array()) {
+            let rel_records: Vec<crate::graph::RelationshipRecord> = relationships
+                .iter()
+                .enumerate()
+                .map(|(index, raw)| crate::graph::RelationshipRecord {
+                    file: std::path::PathBuf::from("dataset.json"),
+                    index,
+                    uuid: raw.get("uuid").and_then(|v| v.as_str()).map(String::from),
+                    raw: raw.clone(),
+                })
+                .collect();
+            graph = graph.with_relationships(rel_records);
+        }
+
+        if let Some(visuals) = dataset.get("visuals").and_then(|v| v.as_array()) {
+            let visual_records: Vec<crate::graph::VisualRecord> = visuals
+                .iter()
+                .filter_map(|raw| {
+                    Some(crate::graph::VisualRecord {
+                        component: raw.get("component")?.as_str()?.to_string(),
+                        file: std::path::PathBuf::from("dataset.json"),
+                        raw: raw.clone(),
+                        layer: crate::graph::Layer::Foundation,
+                    })
+                })
+                .collect();
+            graph = graph.with_visuals(visual_records);
+        }
+
+        if let Some(icons) = dataset.get("icons").and_then(|v| v.as_array()) {
+            let icon_records: Vec<crate::graph::IconSetRecord> = icons
+                .iter()
+                .filter_map(|raw| {
+                    Some(crate::graph::IconSetRecord {
+                        set: raw.get("set")?.as_str()?.to_string(),
+                        file: std::path::PathBuf::from("dataset.json"),
+                        raw: raw.clone(),
+                    })
+                })
+                .collect();
+            graph = graph.with_icons(icon_records);
+        }
+
+        if let Some(mode_sets) = dataset.get("modeSets").and_then(|v| v.as_array()) {
+            let ms_records: Vec<ModeSetRecord> = mode_sets
+                .iter()
+                .filter_map(|v| {
+                    let name = v.get("name")?.as_str()?.to_string();
+                    let default_mode = v.get("default")?.as_str()?.to_string();
+                    let modes: Vec<String> = v
+                        .get("modes")?
+                        .as_array()?
+                        .iter()
+                        .filter_map(|m| m.as_str().map(String::from))
+                        .collect();
+                    Some(ModeSetRecord {
+                        file: std::path::PathBuf::from("dataset.json"),
+                        name,
+                        modes,
+                        default_mode,
+                    })
+                })
+                .collect();
+            graph = graph.with_mode_sets(ms_records);
+        }
+
+        if let Some(guidelines) = dataset.get("guidelines").and_then(|v| v.as_array()) {
+            let guideline_records: Vec<GuidelineRecord> = guidelines
+                .iter()
+                .filter_map(|v| {
+                    let name = v.get("name")?.as_str()?.to_string();
+                    Some(GuidelineRecord {
+                        name,
+                        file: std::path::PathBuf::from("dataset.json"),
+                        raw: v.clone(),
+                    })
+                })
+                .collect();
+            graph = graph.with_guidelines(guideline_records);
+        }
+
+        graph
+    }
+
+    fn load_naming_exceptions() -> HashSet<String> {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../packages/design-data/naming-exceptions.json");
+        NamingExceptionsFile::load(&path)
+            .map(|f| f.token_set())
+            .unwrap_or_default()
+    }
+
+    fn load_manifest(dir: &Path) -> Option<Value> {
+        let mp = dir.join("manifest.json");
+        if mp.is_file() {
+            std::fs::read_to_string(&mp)
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+        } else {
+            None
+        }
+    }
+
+    fn assert_invalid_fixtures() {
+        let base = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../packages/design-data-spec/conformance/invalid");
+        let naming_exceptions = load_naming_exceptions();
+        // Only assert on rules that are registered. Phase 2+ adds the remaining rules;
+        // their fixtures are discovered but their assertions are skipped until then.
+        let registered: std::collections::HashSet<String> =
+            default_rules().iter().map(|r| r.id().to_string()).collect();
+        let mut failures = Vec::new();
+
+        let mut dirs: Vec<_> = std::fs::read_dir(&base)
+            .expect("conformance/invalid dir missing")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().is_dir())
+            .collect();
+        dirs.sort_by_key(|e| e.path());
+
+        for entry in dirs {
+            let dir = entry.path();
+            let dataset_path = dir.join("dataset.json");
+            if !dataset_path.exists() {
+                // Legacy-only fixture: skipped until migrated in Phase 4.
+                continue;
+            }
+            let expected_path = dir.join("expected-errors.json");
+            let case = dir.file_name().unwrap().to_string_lossy().to_string();
+
+            let dataset: Value = serde_json::from_str(
+                &std::fs::read_to_string(&dataset_path)
+                    .unwrap_or_else(|e| panic!("{case}: failed to read dataset.json: {e}")),
+            )
+            .unwrap_or_else(|e| panic!("{case}: invalid dataset.json: {e}"));
+
+            let expected: Value = serde_json::from_str(
+                &std::fs::read_to_string(&expected_path)
+                    .unwrap_or_else(|e| panic!("{case}: failed to read expected-errors.json: {e}")),
+            )
+            .unwrap_or_else(|e| panic!("{case}: invalid expected-errors.json: {e}"));
+
+            // Load optional manifest.json alongside dataset.json (used by SPEC-039).
+            let manifest_val = load_manifest(&dir);
+
+            let graph = build_graph(&dataset);
+            let diagnostics = run_rules(&graph, &naming_exceptions, manifest_val.as_ref());
+
+            let expected_errors = expected
+                .get("errors")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
+
+            for expected_err in &expected_errors {
+                let rule_id = expected_err
+                    .get("rule_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                // Skip assertions for rules not yet implemented in Rust.
+                if !registered.contains(rule_id) {
+                    continue;
+                }
+                let severity = expected_err
+                    .get("severity")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let pattern = expected_err
+                    .get("message_pattern")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(".*");
+                let re = Regex::new(pattern)
+                    .unwrap_or_else(|e| panic!("{case}: invalid message_pattern {pattern:?}: {e}"));
+
+                let matched = diagnostics.iter().any(|d| {
+                    d.rule_id.as_deref() == Some(rule_id)
+                        && severity_str(&d.severity) == severity
+                        && re.is_match(&d.message)
+                });
+
+                if !matched {
+                    let got: Vec<String> = diagnostics
+                        .iter()
+                        .map(|d| {
+                            format!(
+                                "[{} {}] {}",
+                                d.rule_id.as_deref().unwrap_or("?"),
+                                severity_str(&d.severity),
+                                d.message
+                            )
+                        })
+                        .collect();
+                    failures.push(format!(
+                        "{case}: no diagnostic matched rule_id={rule_id:?} severity={severity:?} pattern={pattern:?}\n  Got: [{}]",
+                        got.join("; ")
+                    ));
+                }
+            }
+        }
+
+        assert!(
+            failures.is_empty(),
+            "Validation conformance failures:\n{}",
+            failures.join("\n")
+        );
+    }
+
+    fn assert_valid_fixtures() {
+        let base = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../packages/design-data-spec/conformance/valid");
+        let naming_exceptions = load_naming_exceptions();
+        let mut failures = Vec::new();
+
+        let mut dirs: Vec<_> = std::fs::read_dir(&base)
+            .expect("conformance/valid dir missing")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().is_dir())
+            .collect();
+        dirs.sort_by_key(|e| e.path());
+
+        for entry in dirs {
+            let dir = entry.path();
+            let dataset_path = dir.join("dataset.json");
+            if !dataset_path.exists() {
+                continue;
+            }
+            let case = dir.file_name().unwrap().to_string_lossy().to_string();
+            let dataset: Value = serde_json::from_str(
+                &std::fs::read_to_string(&dataset_path)
+                    .unwrap_or_else(|e| panic!("{case}: failed to read dataset.json: {e}")),
+            )
+            .unwrap_or_else(|e| panic!("{case}: invalid dataset.json: {e}"));
+
+            let manifest_val = load_manifest(&dir);
+
+            let graph = build_graph(&dataset);
+            let diagnostics = run_rules(&graph, &naming_exceptions, manifest_val.as_ref());
+            let errors: Vec<_> = diagnostics
+                .iter()
+                .filter(|d| matches!(d.severity, Severity::Error))
+                .collect();
+
+            // Deliberate policy: only error-severity diagnostics fail the valid
+            // fixture. Warnings (e.g. undocumented custom states/slots) may still
+            // fire on intentionally minimal valid fixtures.
+            if !errors.is_empty() {
+                failures.push(format!(
+                    "{case}: expected no errors but got: {}",
+                    errors
+                        .iter()
+                        .map(|d| d.message.as_str())
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                ));
+            }
+        }
+
+        assert!(
+            failures.is_empty(),
+            "Valid fixture failures:\n{}",
+            failures.join("\n")
+        );
+    }
+
+    #[test]
+    fn invalid_fixtures_match_expected() {
+        assert_invalid_fixtures();
+    }
+
+    #[test]
+    fn valid_fixtures_produce_no_errors() {
+        assert_valid_fixtures();
+    }
+}
+
+/// SPEC-044 dataset-structure conformance — directory-based fixtures.
+///
+/// Unlike [`validation_conformance`] (in-memory `dataset.json` graphs), SPEC-044
+/// inspects the on-disk directory layout, so each fixture under
+/// `conformance/invalid/SPEC-044/<case>/` and `conformance/valid/SPEC-044/` is a
+/// **real dataset tree**. [`check_dataset_structure`](crate::validate::dataset_structure::check_dataset_structure)
+/// is run directly against the case directory and matched against
+/// `expected-errors.json`. Kept separate from `validation_conformance` so the
+/// graph-based harness is untouched (it skips dirs without `dataset.json`).
+#[cfg(test)]
+mod dataset_structure_conformance {
+    use std::path::Path;
+
+    use regex::Regex;
+    use serde_json::Value;
+
+    use crate::report::Severity;
+    use crate::validate::dataset_structure::check_dataset_structure;
+
+    fn severity_str(s: &Severity) -> &'static str {
+        match s {
+            Severity::Error => "error",
+            Severity::Warning => "warning",
+            Severity::Info => "info",
+        }
+    }
+
+    #[test]
+    fn invalid_spec044_fixtures_match_expected() {
+        let base = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../packages/design-data-spec/conformance/invalid/SPEC-044");
+        let mut cases: Vec<_> = std::fs::read_dir(&base)
+            .expect("conformance/invalid/SPEC-044 dir missing")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().is_dir())
+            .collect();
+        cases.sort_by_key(|e| e.path());
+
+        let mut failures = Vec::new();
+        for entry in cases {
+            let dir = entry.path();
+            let case = dir.file_name().unwrap().to_string_lossy().to_string();
+            let expected_path = dir.join("expected-errors.json");
+            let expected: Value = serde_json::from_str(
+                &std::fs::read_to_string(&expected_path)
+                    .unwrap_or_else(|e| panic!("{case}: failed to read expected-errors.json: {e}")),
+            )
+            .unwrap_or_else(|e| panic!("{case}: invalid expected-errors.json: {e}"));
+
+            let diagnostics = check_dataset_structure(&dir);
+            let expected_errors = expected
+                .get("errors")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
+
+            for expected_err in &expected_errors {
+                let rule_id = expected_err
+                    .get("rule_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let severity = expected_err
+                    .get("severity")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let pattern = expected_err
+                    .get("message_pattern")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(".*");
+                let re = Regex::new(pattern)
+                    .unwrap_or_else(|e| panic!("{case}: invalid message_pattern {pattern:?}: {e}"));
+
+                let matched = diagnostics.iter().any(|d| {
+                    d.rule_id.as_deref() == Some(rule_id)
+                        && severity_str(&d.severity) == severity
+                        && re.is_match(&d.message)
+                });
+
+                if !matched {
+                    let got: Vec<String> = diagnostics
+                        .iter()
+                        .map(|d| {
+                            format!(
+                                "[{} {}] {}",
+                                d.rule_id.as_deref().unwrap_or("?"),
+                                severity_str(&d.severity),
+                                d.message
+                            )
+                        })
+                        .collect();
+                    failures.push(format!(
+                        "{case}: no diagnostic matched rule_id={rule_id:?} severity={severity:?} pattern={pattern:?}\n  Got: [{}]",
+                        got.join("; ")
+                    ));
+                }
+            }
+        }
+
+        assert!(
+            failures.is_empty(),
+            "SPEC-044 conformance failures:\n{}",
+            failures.join("\n")
+        );
+    }
+
+    #[test]
+    fn valid_spec044_fixture_has_no_errors() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../packages/design-data-spec/conformance/valid/SPEC-044");
+        let diagnostics = check_dataset_structure(&dir);
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| matches!(d.severity, Severity::Error))
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "expected no errors for valid SPEC-044 fixture, got: {errors:?}"
+        );
+    }
+}
+
+/// Manifest extensions conformance — schema/error harness for the Layer 2
+/// platform manifest's `extensions/` directory loader (h890.26.4).
+///
+/// Fixtures live under
+/// `packages/design-data-spec/conformance/manifest-extensions/{valid,invalid}/<case>/`:
+/// each is a `manifest.json` + `extensions/` tree applied (via
+/// [`crate::manifest::apply_configured`]) against the shared
+/// `manifest-extensions/base/dataset.json` seed graph (the same 3-token
+/// button/checkbox shape as `manifest.rs`'s test-only `make_graph`).
+/// `valid/*` must apply cleanly; `invalid/*` must return an `Err` whose
+/// message matches every `message_pattern` in that case's
+/// `expected-errors.json`. See [`manifest_extensions_behavior`] for the
+/// companion post-apply graph-state harness.
+#[cfg(test)]
+mod manifest_extensions_conformance {
+    use std::path::{Path, PathBuf};
+
+    use regex::Regex;
+    use serde_json::Value;
+
+    use crate::data_source::{Provenance, ResolvedData};
+    use crate::graph::{ComponentRecord, Layer, TokenGraph};
+    use crate::manifest::apply_configured;
+    use crate::CoreError;
+
+    pub(crate) fn family_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../packages/design-data-spec/conformance/manifest-extensions")
+    }
+
+    /// The real `packages/design-data-spec/schemas` dir, whose ancestry contains
+    /// `packages/design-data-spec/schemas/manifest.schema.json` — mirrors
+    /// `manifest.rs`'s test-only `repo_schemas_root`.
+    fn repo_schemas_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/design-data-spec/schemas")
+    }
+
+    /// Load `base/dataset.json` (`{"tokens": [{"key": ..., ...}, ...],
+    /// "components": [...]}`) into a [`TokenGraph`] via
+    /// [`TokenGraph::from_pairs`], using each token's `key` field as the graph
+    /// key, plus any foundation-layer `components`.
+    fn base_graph() -> TokenGraph {
+        let path = family_root().join("base/dataset.json");
+        let dataset: Value = serde_json::from_str(
+            &std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display())),
+        )
+        .unwrap_or_else(|e| panic!("invalid {}: {e}", path.display()));
+        let pairs = dataset["tokens"]
+            .as_array()
+            .expect("base dataset.json has a top-level \"tokens\" array")
+            .iter()
+            .map(|t| {
+                let key = t["key"]
+                    .as_str()
+                    .expect("each base token has a \"key\"")
+                    .to_string();
+                (key, PathBuf::from("dataset.json"), t.clone())
+            })
+            .collect();
+        let components = dataset
+            .get("components")
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+            .map(|c| ComponentRecord {
+                name: c["name"]
+                    .as_str()
+                    .expect("each base component has a \"name\"")
+                    .to_string(),
+                file: PathBuf::from("dataset.json"),
+                raw: c.clone(),
+                layer: Layer::Foundation,
+            })
+            .collect();
+        TokenGraph::from_pairs(pairs).with_components(components)
+    }
+
+    /// Build the base graph and resolve+apply `<dir>/manifest.json` against it
+    /// via `apply_configured`, returning the resulting graph on success.
+    pub(crate) fn apply_case(dir: &Path) -> Result<TokenGraph, CoreError> {
+        let mut graph = base_graph();
+        let resolved = ResolvedData {
+            tokens_root: PathBuf::from("tokens"),
+            schemas_root: repo_schemas_root(),
+            mode_sets: None,
+            components: None,
+            fields: None,
+            guidelines: None,
+            relationships: None,
+            icons: None,
+            exceptions: None,
+            platform_manifest: Some(dir.join("manifest.json")),
+            provenance: Provenance::InRepo,
+        };
+        apply_configured(&mut graph, &resolved).map(|_| graph)
+    }
+
+    fn case_dirs(dir: &Path) -> Vec<PathBuf> {
+        let mut cases: Vec<PathBuf> = std::fs::read_dir(dir)
+            .unwrap_or_else(|e| panic!("{} missing: {e}", dir.display()))
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.is_dir())
+            .collect();
+        cases.sort();
+        cases
+    }
+
+    #[test]
+    fn valid_cases_apply_cleanly() {
+        let mut failures = Vec::new();
+        for dir in case_dirs(&family_root().join("valid")) {
+            let case = dir.file_name().unwrap().to_string_lossy().to_string();
+            if let Err(e) = apply_case(&dir) {
+                failures.push(format!("{case}: expected Ok, got Err: {e}"));
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn boolean_component_option_value_aliases_are_rejected() {
+        let source = family_root().join("valid/injects-component-option-extension");
+        let dir = tempfile::tempdir().expect("create boolean option alias fixture");
+        let components = dir.path().join("extensions/components");
+        let platform_extensions = dir.path().join("extensions/platform-extensions");
+        std::fs::create_dir_all(&components).unwrap();
+        std::fs::create_dir_all(&platform_extensions).unwrap();
+        std::fs::copy(
+            source.join("manifest.json"),
+            dir.path().join("manifest.json"),
+        )
+        .unwrap();
+        std::fs::copy(
+            source.join("extensions/components/button.json"),
+            components.join("button.json"),
+        )
+        .unwrap();
+        let extension = serde_json::json!({
+            "platform": "Web Components",
+            "componentOptions": [{
+                "component": "button",
+                "option": "isDisabled",
+                "platformProp": "disabled",
+                "values": [{"value": "true", "platformValue": "true"}]
+            }]
+        });
+        std::fs::write(
+            platform_extensions.join("broken.json"),
+            serde_json::to_vec(&extension).unwrap(),
+        )
+        .unwrap();
+
+        let error = apply_case(dir.path())
+            .expect_err("boolean options without canonical values must reject value aliases");
+        match error {
+            CoreError::ParseError(message) => assert_eq!(
+                message,
+                "platform manifest extensions.platformExtensions (Web Components) \
+                 componentOptions maps values for option \"isDisabled\" on component \
+                 \"button\", which has no canonical values"
+            ),
+            other => panic!("expected the no-canonical-values parse error, got: {other}"),
+        }
+    }
+
+    #[test]
+    fn invalid_cases_match_expected_errors() {
+        let mut failures = Vec::new();
+        for dir in case_dirs(&family_root().join("invalid")) {
+            let case = dir.file_name().unwrap().to_string_lossy().to_string();
+            let expected_path = dir.join("expected-errors.json");
+            let expected: Value = serde_json::from_str(
+                &std::fs::read_to_string(&expected_path)
+                    .unwrap_or_else(|e| panic!("{case}: failed to read expected-errors.json: {e}")),
+            )
+            .unwrap_or_else(|e| panic!("{case}: invalid expected-errors.json: {e}"));
+            let patterns: Vec<String> = expected
+                .get("errors")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|e| {
+                    e.get("message_pattern")
+                        .and_then(|v| v.as_str())
+                        .map(String::from)
+                })
+                .collect();
+
+            match apply_case(&dir) {
+                Ok(_) => failures.push(format!("{case}: expected Err, got Ok")),
+                Err(e) => {
+                    let msg = e.to_string();
+                    for pattern in &patterns {
+                        let re = Regex::new(pattern).unwrap_or_else(|e| {
+                            panic!("{case}: invalid message_pattern {pattern:?}: {e}")
+                        });
+                        if !re.is_match(&msg) {
+                            failures.push(format!(
+                                "{case}: error message did not match pattern {pattern:?}\n  Got: {msg}"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+}
+
+/// Manifest extensions behavior harness — asserts `expected.json` predicates
+/// (relationship `byUuid` count/value, `absent` uuids, component/field/
+/// guideline presence by name, token load order by uuid) against the
+/// post-`apply_configured` graph state for `valid/*`
+/// [`manifest_extensions_conformance`] cases that carry them. Cases whose
+/// `expected.json` is `{}` (loads-clean only) are skipped here — they're
+/// fully covered by `manifest_extensions_conformance::valid_cases_apply_cleanly`.
+#[cfg(test)]
+mod manifest_extensions_behavior {
+    use std::path::PathBuf;
+
+    use serde_json::Value;
+
+    use super::manifest_extensions_conformance::{apply_case, family_root};
+
+    #[test]
+    fn valid_case_predicates_hold() {
+        let base = family_root().join("valid");
+        let mut cases: Vec<PathBuf> = std::fs::read_dir(&base)
+            .unwrap_or_else(|e| panic!("{} missing: {e}", base.display()))
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.is_dir())
+            .collect();
+        cases.sort();
+
+        let mut failures = Vec::new();
+        for dir in cases {
+            let case = dir.file_name().unwrap().to_string_lossy().to_string();
+            let expected_path = dir.join("expected.json");
+            let expected: Value = serde_json::from_str(
+                &std::fs::read_to_string(&expected_path)
+                    .unwrap_or_else(|e| panic!("{case}: failed to read expected.json: {e}")),
+            )
+            .unwrap_or_else(|e| panic!("{case}: invalid expected.json: {e}"));
+
+            if expected.as_object().is_none_or(|o| o.is_empty()) {
+                continue; // "loads clean" only — no predicates to check here.
+            }
+
+            let graph = match apply_case(&dir) {
+                Ok(g) => g,
+                Err(e) => {
+                    failures.push(format!("{case}: apply_configured failed: {e}"));
+                    continue;
+                }
+            };
+
+            if let Some(rel) = expected.get("relationships") {
+                if let Some(by_uuid) = rel.get("byUuid").and_then(|v| v.as_object()) {
+                    for (uuid, spec) in by_uuid {
+                        let matching: Vec<_> = graph
+                            .relationships
+                            .iter()
+                            .filter(|r| r.uuid.as_deref() == Some(uuid.as_str()))
+                            .collect();
+                        if let Some(count) = spec.get("count").and_then(|v| v.as_u64()) {
+                            if matching.len() as u64 != count {
+                                failures.push(format!(
+                                    "{case}: relationship {uuid} expected count {count}, got {}",
+                                    matching.len()
+                                ));
+                            }
+                        }
+                        if let Some(value) = spec.get("value") {
+                            match matching.as_slice() {
+                                [only] if only.raw.get("value") == Some(value) => {}
+                                _ => failures.push(format!(
+                                    "{case}: relationship {uuid} expected a single match with value {value}, got {:?}",
+                                    matching.iter().map(|r| &r.raw).collect::<Vec<_>>()
+                                )),
+                            }
+                        }
+                    }
+                }
+                if let Some(absent) = rel.get("absent").and_then(|v| v.as_array()) {
+                    for uuid in absent.iter().filter_map(|v| v.as_str()) {
+                        if graph
+                            .relationships
+                            .iter()
+                            .any(|r| r.uuid.as_deref() == Some(uuid))
+                        {
+                            failures.push(format!(
+                                "{case}: expected relationship {uuid} absent, but present"
+                            ));
+                        }
+                    }
+                }
+            }
+
+            if let Some(by_component) = expected.get("implementations").and_then(|v| v.as_object())
+            {
+                for (name, want) in by_component {
+                    let got = graph
+                        .components
+                        .iter()
+                        .find(|c| &c.name == name)
+                        .and_then(|c| c.raw.get("implementations"));
+                    if got != Some(want) {
+                        failures.push(format!(
+                            "{case}: component {name:?} implementations expected {want}, got {got:?}"
+                        ));
+                    }
+                }
+            }
+
+            if let Some(present) = expected
+                .get("platformExtensions")
+                .and_then(|p| p.get("present"))
+                .and_then(|v| v.as_array())
+            {
+                for want in present {
+                    let platform = want.get("platform").and_then(|v| v.as_str());
+                    let extends = want.get("extends").and_then(|v| v.as_str());
+                    let term_id = want.get("termId").and_then(|v| v.as_str());
+                    let platform_term = want.get("platformTerm").and_then(|v| v.as_str());
+
+                    let Some(record) = graph.platform_extensions.iter().find(|r| {
+                        Some(r.platform.as_str()) == platform && Some(r.extends.as_str()) == extends
+                    }) else {
+                        failures.push(format!(
+                            "{case}: expected platform extension {platform:?}/{extends:?}, not found"
+                        ));
+                        continue;
+                    };
+
+                    if let Some(term_id) = term_id {
+                        let matched = record
+                            .raw
+                            .get("extensions")
+                            .and_then(|v| v.as_array())
+                            .is_some_and(|terms| {
+                                terms.iter().any(|t| {
+                                    t.get("termId").and_then(|v| v.as_str()) == Some(term_id)
+                                        && (platform_term.is_none()
+                                            || t.get("platformTerm").and_then(|v| v.as_str())
+                                                == platform_term)
+                                })
+                            });
+                        if !matched {
+                            failures.push(format!(
+                                "{case}: platform extension {platform:?}/{extends:?} missing term {term_id:?} (platformTerm {platform_term:?})"
+                            ));
+                        }
+                    }
+                }
+            }
+
+            if let Some(present) = expected
+                .get("componentOptionExtensions")
+                .and_then(|p| p.get("present"))
+                .and_then(|v| v.as_array())
+            {
+                for want in present {
+                    let platform = want.get("platform").and_then(|v| v.as_str());
+                    let component = want.get("component").and_then(|v| v.as_str());
+                    let option = want.get("option").and_then(|v| v.as_str());
+                    let platform_prop = want.get("platformProp").and_then(|v| v.as_str());
+
+                    let Some(record) = graph.component_option_extensions.iter().find(|r| {
+                        Some(r.platform.as_str()) == platform
+                            && Some(r.component.as_str()) == component
+                            && Some(r.option.as_str()) == option
+                    }) else {
+                        failures.push(format!(
+                            "{case}: expected component option extension {platform:?}/{component:?}/{option:?}, not found"
+                        ));
+                        continue;
+                    };
+
+                    if let Some(platform_prop) = platform_prop {
+                        let actual = record.raw.get("platformProp").and_then(|v| v.as_str());
+                        if actual != Some(platform_prop) {
+                            failures.push(format!(
+                                "{case}: component option extension {platform:?}/{component:?}/{option:?} expected platformProp {platform_prop:?}, got {actual:?}"
+                            ));
+                        }
+                    }
+                }
+            }
+
+            for (key, records_len) in [
+                (
+                    "components",
+                    &graph
+                        .components
+                        .iter()
+                        .map(|c| c.name.clone())
+                        .collect::<Vec<_>>(),
+                ),
+                (
+                    "fields",
+                    &graph
+                        .fields
+                        .iter()
+                        .map(|f| f.name.clone())
+                        .collect::<Vec<_>>(),
+                ),
+                (
+                    "guidelines",
+                    &graph
+                        .guidelines
+                        .iter()
+                        .map(|g| g.name.clone())
+                        .collect::<Vec<_>>(),
+                ),
+                (
+                    "modeSets",
+                    &graph
+                        .mode_sets
+                        .iter()
+                        .map(|m| m.name.clone())
+                        .collect::<Vec<_>>(),
+                ),
+            ] {
+                if let Some(present) = expected
+                    .get(key)
+                    .and_then(|c| c.get("present"))
+                    .and_then(|v| v.as_array())
+                {
+                    for name in present.iter().filter_map(|v| v.as_str()) {
+                        let count = records_len.iter().filter(|n| n.as_str() == name).count();
+                        if count != 1 {
+                            failures.push(format!(
+                                "{case}: expected exactly one {key} named {name:?}, found {count}"
+                            ));
+                        }
+                    }
+                }
+                if let Some(absent) = expected
+                    .get(key)
+                    .and_then(|c| c.get("absent"))
+                    .and_then(|v| v.as_array())
+                {
+                    for name in absent.iter().filter_map(|v| v.as_str()) {
+                        if records_len.iter().any(|n| n.as_str() == name) {
+                            failures.push(format!(
+                                "{case}: expected no {key} named {name:?}, but found one"
+                            ));
+                        }
+                    }
+                }
+            }
+
+            if let Some(mode_sets) = expected.get("modeSets") {
+                if let Some(modes) = mode_sets.get("modes").and_then(|v| v.as_object()) {
+                    for (name, want) in modes {
+                        let Some(record) = graph.mode_sets.iter().find(|m| &m.name == name) else {
+                            failures.push(format!(
+                                "{case}: expected mode set {name:?} present to check modes/default"
+                            ));
+                            continue;
+                        };
+                        if let Some(want_modes) = want.get("modes").and_then(|v| v.as_array()) {
+                            let want_modes: Vec<&str> =
+                                want_modes.iter().filter_map(|v| v.as_str()).collect();
+                            if record.modes != want_modes {
+                                failures.push(format!(
+                                    "{case}: mode set {name:?} expected modes {want_modes:?}, got {:?}",
+                                    record.modes
+                                ));
+                            }
+                        }
+                        if let Some(want_default) = want.get("default").and_then(|v| v.as_str()) {
+                            if record.default_mode != want_default {
+                                failures.push(format!(
+                                    "{case}: mode set {name:?} expected default {want_default:?}, got {:?}",
+                                    record.default_mode
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let Some(order) = expected
+                .get("tokens")
+                .and_then(|t| t.get("orderByUuid"))
+                .and_then(|v| v.as_array())
+            {
+                let uuids: Vec<&str> = order.iter().filter_map(|v| v.as_str()).collect();
+                let mut last_file: Option<PathBuf> = None;
+                for uuid in &uuids {
+                    let Some(record) = graph
+                        .tokens
+                        .values()
+                        .find(|t| t.uuid.as_deref() == Some(*uuid))
+                    else {
+                        failures.push(format!(
+                            "{case}: expected token uuid {uuid} present, not found"
+                        ));
+                        continue;
+                    };
+                    if let Some(prev) = &last_file {
+                        if &record.file < prev {
+                            failures.push(format!(
+                                "{case}: token uuid {uuid} loaded out of sorted-path order"
+                            ));
+                        }
+                    }
+                    last_file = Some(record.file.clone());
+                }
+            }
+        }
+
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+}
+
+/// Resolution conformance tests — fixture-driven, closes #768.
+///
+/// Each test case lives under `packages/design-data-spec/conformance/resolution/<name>/`
+/// with `input/` (cascade tokens), optional `mode-sets/`, `query.json`, and `expected.json`.
+#[cfg(test)]
+mod resolution_conformance {
+    use std::collections::HashMap;
+    use std::path::Path;
+
+    use serde_json::Value;
+
+    use crate::cascade::{resolve, ResolutionContext};
+    use crate::graph::TokenGraph;
+
+    fn run_fixture(case: &str) {
+        let base = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../packages/design-data-spec/conformance/resolution")
+            .join(case);
+
+        let query_text = std::fs::read_to_string(base.join("query.json"))
+            .unwrap_or_else(|e| panic!("{case}: failed to read query.json: {e}"));
+        let query: Value = serde_json::from_str(&query_text)
+            .unwrap_or_else(|e| panic!("{case}: invalid query.json: {e}"));
+
+        let expected_text = std::fs::read_to_string(base.join("expected.json"))
+            .unwrap_or_else(|e| panic!("{case}: failed to read expected.json: {e}"));
+        let expected: Value = serde_json::from_str(&expected_text)
+            .unwrap_or_else(|e| panic!("{case}: invalid expected.json: {e}"));
+
+        let property = query["property"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{case}: query.json missing 'property'"));
+
+        let ctx_map: HashMap<String, String> = query
+            .get("context")
+            .and_then(|v| v.as_object())
+            .map(|o| {
+                o.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let mut ctx = ResolutionContext::new();
+        for (k, v) in ctx_map {
+            ctx = ctx.with(k, v);
+        }
+
+        let mut graph = TokenGraph::from_json_dir(&base.join("input"))
+            .unwrap_or_else(|e| panic!("{case}: failed to load tokens: {e}"));
+
+        let mode_sets_dir = base.join("mode-sets");
+        if mode_sets_dir.is_dir() {
+            let mode_sets = TokenGraph::load_spec_mode_sets(&mode_sets_dir)
+                .unwrap_or_else(|e| panic!("{case}: failed to load mode sets: {e}"));
+            graph = graph.with_mode_sets(mode_sets);
+        }
+
+        // Optionally load a product-context.json to test multi-layer resolution.
+        let product_context_path = base.join("product-context.json");
+        if product_context_path.is_file() {
+            graph
+                .load_product_context(&product_context_path)
+                .unwrap_or_else(|e| panic!("{case}: failed to load product-context.json: {e}"));
+        }
+
+        // Filter to property, preserving layer info via from_records.
+        let candidates: Vec<_> = graph
+            .tokens
+            .values()
+            .filter(|t| {
+                t.raw
+                    .get("name")
+                    .and_then(|v| v.as_object())
+                    .and_then(|n| n.get("property"))
+                    .and_then(|v| v.as_str())
+                    == Some(property)
+            })
+            .cloned()
+            .collect();
+
+        let filtered = TokenGraph::from_records(candidates).with_mode_sets(graph.mode_sets.clone());
+
+        let should_resolve = expected["resolved"].as_bool().unwrap_or(true);
+        let winner = resolve(&filtered, &ctx);
+
+        if should_resolve {
+            let winner = winner.unwrap_or_else(|| {
+                panic!("{case}: expected resolution but got None");
+            });
+            if let Some(expected_uuid) = expected["expected_uuid"].as_str() {
+                let actual_uuid = winner.raw.get("uuid").and_then(|v| v.as_str());
+                assert_eq!(
+                    actual_uuid,
+                    Some(expected_uuid),
+                    "{case}: wrong token selected (uuid mismatch)"
+                );
+            }
+            if let Some(expected_value) = expected.get("expected_value") {
+                let actual_value = winner.raw.get("value");
+                assert_eq!(
+                    actual_value,
+                    Some(expected_value),
+                    "{case}: wrong value resolved"
+                );
+            }
+        } else {
+            assert!(
+                winner.is_none(),
+                "{case}: expected no resolution but got a winner"
+            );
+        }
+    }
+
+    #[test]
+    fn base_fallback() {
+        run_fixture("base-fallback");
+    }
+
+    #[test]
+    fn specificity_wins() {
+        run_fixture("specificity-wins");
+    }
+
+    #[test]
+    fn alias_resolved_after_cascade() {
+        run_fixture("alias-resolved-after-cascade");
+    }
+
+    #[test]
+    fn product_layer_wins() {
+        run_fixture("product-layer-wins");
+    }
+}
+
+/// Migration roundtrip tests — closes #769.
+#[cfg(test)]
+mod migration_roundtrip {
+    use std::path::PathBuf;
+
+    use serde_json::json;
+
+    use crate::graph::TokenGraph;
+    use crate::migrate::convert_token;
+
+    #[test]
+    fn color_set_roundtrip_loadable_in_graph() {
+        // Convert a color-set token to cascade format.
+        let tokens = convert_token(
+            "overlay-opacity",
+            json!({
+                "$schema": ".../color-set.json",
+                "sets": {
+                    "light":     { "$schema": ".../opacity.json", "value": "0.4", "uuid": "rt-0001-0000-0000-000000000001" },
+                    "dark":      { "$schema": ".../opacity.json", "value": "0.6", "uuid": "rt-0001-0000-0000-000000000002" },
+                    "wireframe": { "$schema": ".../opacity.json", "value": "0.4", "uuid": "rt-0001-0000-0000-000000000003" }
+                }
+            })
+            .as_object()
+            .unwrap(),
+        );
+        assert_eq!(tokens.len(), 3);
+
+        // Load the output tokens into a TokenGraph (simulating what from_json_dir does
+        // for cascade arrays).
+        let pairs: Vec<_> = tokens
+            .iter()
+            .map(|v| {
+                let uuid = v["uuid"].as_str().unwrap_or("").to_string();
+                (uuid, PathBuf::from("output.tokens.json"), v.clone())
+            })
+            .collect();
+        let graph = TokenGraph::from_pairs(pairs);
+        assert_eq!(
+            graph.tokens.len(),
+            3,
+            "all 3 cascade tokens should be in graph"
+        );
+
+        // All tokens should carry the property name.
+        for t in graph.tokens.values() {
+            let property = t.raw["name"]["property"].as_str().unwrap();
+            assert_eq!(property, "overlay-opacity");
+        }
+    }
+
+    #[test]
+    fn scale_set_roundtrip_resolves_in_context() {
+        use crate::cascade::{resolve, ResolutionContext};
+        use crate::graph::{ModeSetRecord, TokenGraph};
+
+        let tokens = convert_token(
+            "spacing-100",
+            json!({
+                "$schema": ".../scale-set.json",
+                "sets": {
+                    "desktop": { "$schema": ".../dimension.json", "value": "8px",  "uuid": "rt-0002-0000-0000-000000000001" },
+                    "mobile":  { "$schema": ".../dimension.json", "value": "10px", "uuid": "rt-0002-0000-0000-000000000002" }
+                }
+            })
+            .as_object()
+            .unwrap(),
+        );
+
+        let pairs: Vec<_> = tokens
+            .iter()
+            .map(|v| {
+                let uuid = v["uuid"].as_str().unwrap_or("").to_string();
+                (uuid, PathBuf::from("output.tokens.json"), v.clone())
+            })
+            .collect();
+        let graph = TokenGraph::from_pairs(pairs).with_mode_sets(vec![ModeSetRecord {
+            file: PathBuf::from("scale.json"),
+            name: "scale".into(),
+            modes: vec!["desktop".into(), "mobile".into()],
+            default_mode: "desktop".into(),
+        }]);
+
+        let ctx = ResolutionContext::new().with("scale", "mobile");
+        let winner = resolve(&graph, &ctx).expect("should resolve for mobile");
+        assert_eq!(winner.raw["value"].as_str(), Some("10px"));
+
+        let ctx = ResolutionContext::new().with("scale", "desktop");
+        let winner = resolve(&graph, &ctx).expect("should resolve for desktop");
+        assert_eq!(winner.raw["value"].as_str(), Some("8px"));
+    }
+}
+
+/// Reference conformance tests — fixture-driven.
+///
+/// Each test case lives under `packages/design-data-spec/conformance/reference/<name>/`
+/// with `input/` (cascade tokens), `query.json`, and `expected.json`.
+///
+/// `query.json` shape: `{ "ref": "{slug}", "context": { …name-object fields… } }`.
+/// `expected.json` shape:
+///   - `resolved: bool` — whether `resolve_reference` should return `Some`.
+///   - `expected_value?: any` — asserts the terminal value when `resolved: true`.
+///   - `expected_has_value?: bool` — when false, asserts value is None (dangling chain).
+///   - `expected_chain_length?: number` — exact chain length.
+///   - `expected_chain_min_length?: number` — minimum chain length.
+///   - `expected_chain_0?: string` — asserts `chain[0]`.
+///   - `expected_chain_last?: string` — asserts `chain[chain.len()-1]`.
+#[cfg(test)]
+mod reference_conformance {
+    use std::collections::HashMap;
+    use std::path::Path;
+
+    use serde_json::Value;
+
+    use crate::cascade::resolve_reference;
+    use crate::graph::TokenGraph;
+
+    fn run_fixture(case: &str) {
+        let base = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../packages/design-data-spec/conformance/reference")
+            .join(case);
+
+        let query_text = std::fs::read_to_string(base.join("query.json"))
+            .unwrap_or_else(|e| panic!("{case}: failed to read query.json: {e}"));
+        let query: Value = serde_json::from_str(&query_text)
+            .unwrap_or_else(|e| panic!("{case}: invalid query.json: {e}"));
+
+        let expected_text = std::fs::read_to_string(base.join("expected.json"))
+            .unwrap_or_else(|e| panic!("{case}: failed to read expected.json: {e}"));
+        let expected: Value = serde_json::from_str(&expected_text)
+            .unwrap_or_else(|e| panic!("{case}: invalid expected.json: {e}"));
+
+        let slug = query["ref"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{case}: query.json missing 'ref'"));
+
+        let ctx: HashMap<String, String> = query
+            .get("context")
+            .and_then(|v| v.as_object())
+            .map(|o| {
+                o.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let graph = TokenGraph::from_json_dir(&base.join("input"))
+            .unwrap_or_else(|e| panic!("{case}: failed to load tokens: {e}"));
+
+        let should_resolve = expected["resolved"].as_bool().unwrap_or(true);
+        let result = resolve_reference(&graph, slug, &ctx);
+
+        if !should_resolve {
+            assert!(
+                result.is_none(),
+                "{case}: expected None but got Some({result:?})"
+            );
+            return;
+        }
+
+        let r = result.unwrap_or_else(|| panic!("{case}: expected Some but got None"));
+
+        // Optional: assert that value is present or absent.
+        if let Some(has_value) = expected.get("expected_has_value").and_then(|v| v.as_bool()) {
+            if has_value {
+                assert!(
+                    r.value.is_some(),
+                    "{case}: expected a terminal value but got None"
+                );
+            } else {
+                assert!(
+                    r.value.is_none(),
+                    "{case}: expected no terminal value but got {:?}",
+                    r.value
+                );
+            }
+        }
+
+        // Optional: assert terminal value.
+        if let Some(expected_value) = expected.get("expected_value") {
+            let actual = r.value.as_ref().unwrap_or_else(|| {
+                panic!("{case}: expected_value asserted but result has no value")
+            });
+            assert_eq!(actual, expected_value, "{case}: wrong terminal value");
+        }
+
+        // Optional: chain length checks.
+        if let Some(len) = expected
+            .get("expected_chain_length")
+            .and_then(|v| v.as_u64())
+        {
+            assert_eq!(
+                r.chain.len(),
+                len as usize,
+                "{case}: expected chain length {len}, got {} ({:?})",
+                r.chain.len(),
+                r.chain
+            );
+        }
+        if let Some(min) = expected
+            .get("expected_chain_min_length")
+            .and_then(|v| v.as_u64())
+        {
+            assert!(
+                r.chain.len() >= min as usize,
+                "{case}: expected chain.len() >= {min}, got {} ({:?})",
+                r.chain.len(),
+                r.chain
+            );
+        }
+        if let Some(first) = expected.get("expected_chain_0").and_then(|v| v.as_str()) {
+            assert_eq!(
+                r.chain.first().map(String::as_str),
+                Some(first),
+                "{case}: wrong chain[0]"
+            );
+        }
+        if let Some(last) = expected.get("expected_chain_last").and_then(|v| v.as_str()) {
+            assert_eq!(
+                r.chain.last().map(String::as_str),
+                Some(last),
+                "{case}: wrong chain[-1]"
+            );
+        }
+    }
+
+    #[test]
+    fn set_alias_light() {
+        run_fixture("set-alias-light");
+    }
+
+    #[test]
+    fn set_alias_dark() {
+        run_fixture("set-alias-dark");
+    }
+
+    #[test]
+    fn dangling_ref() {
+        run_fixture("dangling-ref");
+    }
+
+    #[test]
+    fn unknown_slug() {
+        run_fixture("unknown-slug");
+    }
+}
+
+/// Diff conformance tests — fixture-driven, closes #788.
+///
+/// Each test case lives under `packages/design-data-spec/conformance/diff/<name>/`
+/// with `old/` (old tokens), `new/` (new tokens), and `expected.json` (DiffReport).
+#[cfg(test)]
+mod diff_conformance {
+    use std::path::Path;
+
+    use serde_json::Value;
+
+    use crate::diff::semantic_diff;
+    use crate::graph::TokenGraph;
+
+    fn run_fixture(case: &str) {
+        let base = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../packages/design-data-spec/conformance/diff")
+            .join(case);
+
+        let old = TokenGraph::from_json_dir(&base.join("old"))
+            .unwrap_or_else(|e| panic!("{case}: failed to load old/: {e}"));
+        let new = TokenGraph::from_json_dir(&base.join("new"))
+            .unwrap_or_else(|e| panic!("{case}: failed to load new/: {e}"));
+
+        let report = semantic_diff(&old, &new);
+
+        let actual: Value = serde_json::to_value(&report)
+            .unwrap_or_else(|e| panic!("{case}: failed to serialize report: {e}"));
+
+        let expected_text = std::fs::read_to_string(base.join("expected.json"))
+            .unwrap_or_else(|e| panic!("{case}: failed to read expected.json: {e}"));
+        let expected: Value = serde_json::from_str(&expected_text)
+            .unwrap_or_else(|e| panic!("{case}: invalid expected.json: {e}"));
+
+        for key in [
+            "renamed",
+            "deprecated",
+            "reverted",
+            "added",
+            "deleted",
+            "updated",
+        ] {
+            let actual_arr = actual.get(key).and_then(|v| v.as_array());
+            let expected_arr = expected.get(key).and_then(|v| v.as_array());
+            assert_eq!(
+                actual_arr,
+                expected_arr,
+                "{case}: mismatch in '{key}'\n  actual:   {}\n  expected: {}",
+                serde_json::to_string_pretty(&actual_arr).unwrap_or_default(),
+                serde_json::to_string_pretty(&expected_arr).unwrap_or_default(),
+            );
+        }
+    }
+
+    #[test]
+    fn identical_tokens() {
+        run_fixture("identical-tokens");
+    }
+
+    #[test]
+    fn simple_add_delete() {
+        run_fixture("simple-add-delete");
+    }
+
+    #[test]
+    fn rename_by_uuid() {
+        run_fixture("rename-by-uuid");
+    }
+
+    #[test]
+    fn deprecated_new_token() {
+        run_fixture("deprecated-new-token");
+    }
+
+    #[test]
+    fn deprecated_set_level() {
+        run_fixture("deprecated-set-level");
+    }
+
+    #[test]
+    fn reverted_token() {
+        run_fixture("reverted-token");
+    }
+
+    #[test]
+    fn matched_gaining_deprecated() {
+        run_fixture("matched-gaining-deprecated");
+    }
+
+    #[test]
+    fn property_value_update() {
+        run_fixture("property-value-update");
+    }
+
+    #[test]
+    fn property_nested_change() {
+        run_fixture("property-nested-change");
+    }
+
+    #[test]
+    fn uuid_backfill() {
+        run_fixture("uuid-backfill");
+    }
+
+    #[test]
+    fn cross_format() {
+        run_fixture("cross-format");
+    }
+
+    #[test]
+    fn rename_with_property_changes() {
+        run_fixture("rename-with-property-changes");
+    }
+
+    #[test]
+    fn replaced_by_pairing() {
+        run_fixture("replaced-by-pairing");
+    }
+}
+
+/// Query conformance tests — fixture-driven, closes #788.
+///
+/// Each test case lives under `packages/design-data-spec/conformance/query/<name>/`
+/// with `input/` (tokens), `query.txt` (filter expression), and `expected.json`
+/// (sorted array of matched token UUIDs).
+#[cfg(test)]
+mod query_conformance {
+    use std::path::Path;
+
+    use serde_json::Value;
+
+    use crate::graph::TokenGraph;
+    use crate::query;
+
+    fn run_fixture(case: &str) {
+        let base = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../packages/design-data-spec/conformance/query")
+            .join(case);
+
+        let graph = TokenGraph::from_json_dir(&base.join("input"))
+            .unwrap_or_else(|e| panic!("{case}: failed to load input/: {e}"));
+
+        let query_text = std::fs::read_to_string(base.join("query.txt"))
+            .unwrap_or_else(|e| panic!("{case}: failed to read query.txt: {e}"));
+
+        let filter_expr =
+            query::parse(&query_text).unwrap_or_else(|e| panic!("{case}: query parse error: {e}"));
+        let results = query::filter(&graph, &filter_expr);
+
+        let mut actual_uuids: Vec<String> = results.iter().filter_map(|t| t.uuid.clone()).collect();
+        actual_uuids.sort();
+
+        let expected_text = std::fs::read_to_string(base.join("expected.json"))
+            .unwrap_or_else(|e| panic!("{case}: failed to read expected.json: {e}"));
+        let expected: Value = serde_json::from_str(&expected_text)
+            .unwrap_or_else(|e| panic!("{case}: invalid expected.json: {e}"));
+        let expected_uuids: Vec<String> = expected
+            .as_array()
+            .unwrap_or_else(|| panic!("{case}: expected.json must be an array"))
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect();
+
+        assert_eq!(
+            actual_uuids, expected_uuids,
+            "{case}: UUID mismatch\n  actual:   {actual_uuids:?}\n  expected: {expected_uuids:?}"
+        );
+    }
+
+    #[test]
+    fn single_field() {
+        run_fixture("single-field");
+    }
+
+    #[test]
+    fn and_conditions() {
+        run_fixture("and-conditions");
+    }
+
+    #[test]
+    fn or_conditions() {
+        run_fixture("or-conditions");
+    }
+
+    #[test]
+    fn negation() {
+        run_fixture("negation");
+    }
+
+    #[test]
+    fn wildcard_suffix() {
+        run_fixture("wildcard-suffix");
+    }
+
+    #[test]
+    fn wildcard_prefix() {
+        run_fixture("wildcard-prefix");
+    }
+
+    #[test]
+    fn empty_matches_all() {
+        run_fixture("empty-matches-all");
+    }
+
+    #[test]
+    fn no_matches() {
+        run_fixture("no-matches");
+    }
+
+    #[test]
+    fn schema_key() {
+        run_fixture("schema-key");
+    }
+
+    #[test]
+    fn and_or_precedence() {
+        run_fixture("and-or-precedence");
+    }
+}
+
+/// Generation conformance tests — fixture-driven.
+///
+/// Each test case lives under `packages/design-data-spec/conformance/generation/<name>/`
+/// with `input/` (cascade `.tokens.json` files) and `expected/` (byte-identical legacy
+/// output produced by `design-data migrate legacy-output`).
+///
+/// Two guarantees are verified per fixture:
+///   1. **Byte-identical output** — `convert_dir(input, out)` matches `expected/` exactly,
+///      covering conversion logic and key-ordering contract.
+///   2. **Determinism** — a second `convert_dir` run on the same input produces identical
+///      output, verifying no run-to-run variance in the generator.
+#[cfg(test)]
+mod generation_conformance {
+    use std::path::Path;
+
+    use crate::legacy;
+
+    fn sorted_filenames(dir: &std::path::Path, case: &str) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap_or_else(|e| panic!("{case}: failed to read {}: {e}", dir.display()))
+            .map(|e| {
+                e.unwrap_or_else(|e| panic!("{case}: dir entry error: {e}"))
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        names.sort();
+        names
+    }
+
+    fn run_fixture(case: &str) {
+        let base = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../packages/design-data-spec/conformance/generation")
+            .join(case);
+
+        let input = base.join("input");
+        let expected_dir = base.join("expected");
+
+        // Pass 1: generate and compare byte-for-byte against committed expected/.
+        let tmp_a =
+            tempfile::tempdir().unwrap_or_else(|e| panic!("{case}: failed to create tempdir: {e}"));
+        legacy::convert_dir(&input, tmp_a.path())
+            .unwrap_or_else(|e| panic!("{case}: convert_dir failed: {e}"));
+
+        // Assert the output file set equals expected/ exactly (catches spurious extra files).
+        let actual_names = sorted_filenames(tmp_a.path(), case);
+        let expected_names = sorted_filenames(&expected_dir, case);
+        assert_eq!(
+            actual_names, expected_names,
+            "{case}: output file set differs from expected/\nactual:   {actual_names:?}\nexpected: {expected_names:?}"
+        );
+
+        for name in &expected_names {
+            let expected = std::fs::read_to_string(expected_dir.join(name))
+                .unwrap_or_else(|e| panic!("{case}/{name}: failed to read expected/{name}: {e}"));
+            let actual = std::fs::read_to_string(tmp_a.path().join(name))
+                .unwrap_or_else(|e| panic!("{case}/{name}: output file missing: {e}"));
+
+            assert_eq!(
+                actual, expected,
+                "{case}/{name}: output differs from expected (byte-level)\n\
+                 === actual ===\n{actual}\n\
+                 === expected ===\n{expected}"
+            );
+        }
+
+        // Pass 2: re-run and compare against pass-1 output (determinism gate).
+        let tmp_b = tempfile::tempdir()
+            .unwrap_or_else(|e| panic!("{case}: failed to create tempdir (pass 2): {e}"));
+        legacy::convert_dir(&input, tmp_b.path())
+            .unwrap_or_else(|e| panic!("{case}: convert_dir pass 2 failed: {e}"));
+
+        for entry in std::fs::read_dir(tmp_a.path())
+            .unwrap_or_else(|e| panic!("{case}: failed to read pass-1 output: {e}"))
+        {
+            let entry = entry.unwrap_or_else(|e| panic!("{case}: dir entry error: {e}"));
+            let file_name = entry.file_name();
+            let name = file_name.to_string_lossy();
+
+            let pass1 = std::fs::read_to_string(entry.path())
+                .unwrap_or_else(|e| panic!("{case}/{name}: failed to read pass-1 output: {e}"));
+            let pass2 = std::fs::read_to_string(tmp_b.path().join(name.as_ref()))
+                .unwrap_or_else(|e| panic!("{case}/{name}: pass-2 output missing: {e}"));
+
+            assert_eq!(
+                pass1, pass2,
+                "{case}/{name}: generator is not deterministic (pass 1 ≠ pass 2)\n\
+                 === pass 1 ===\n{pass1}\n\
+                 === pass 2 ===\n{pass2}"
+            );
+        }
+    }
+
+    #[test]
+    fn flat_token() {
+        run_fixture("flat-token");
+    }
+
+    #[test]
+    fn mode_set_token() {
+        run_fixture("mode-set-token");
+    }
+
+    #[test]
+    fn deprecated_token() {
+        run_fixture("deprecated-token");
+    }
+
+    #[test]
+    fn renamed_token() {
+        run_fixture("renamed-token");
+    }
+
+    #[test]
+    fn alias_rewire() {
+        run_fixture("alias-rewire");
+    }
+
+    #[test]
+    fn mode_set_edit() {
+        run_fixture("mode-set-edit");
+    }
+
+    #[test]
+    fn ctr_legacy_key() {
+        run_fixture("ctr-legacy-key");
+    }
+}

@@ -1,0 +1,96 @@
+const path = require('path');
+const fs = require('fs');
+const { AxeBuilder } = require('@axe-core/webdriverjs');
+const { getWebdriver } = require('../get-webdriver');
+const { assert } = require('chai');
+const { globSync } = require('glob');
+
+describe('aria-practices', function () {
+  // Use path.resolve rather than require.resolve because APG package.json main file does not exist
+  const apgPath = path.resolve(__dirname, '../../node_modules/aria-practices/');
+  const filePaths = globSync(
+    `${apgPath}/content/patterns/*/**/examples/*.html`,
+    { posix: true }
+  );
+  const testFiles = filePaths.map(
+    fileName => fileName.split('/aria-practices/content/patterns/')[1]
+  );
+
+  const addr = `http://localhost:9876/node_modules/aria-practices/`;
+  let driver, axeSource;
+  this.timeout(50000);
+  this.retries(3);
+
+  before(async () => {
+    const axePath = require.resolve('../../axe.js');
+    axeSource = fs.readFileSync(axePath, 'utf8');
+    driver = getWebdriver();
+  });
+
+  after(async () => {
+    await driver.quit();
+  });
+
+  const disabledRules = {
+    '*': [
+      'color-contrast',
+      'target-size',
+      'heading-order', // w3c/aria-practices#2119
+      'scrollable-region-focusable' // w3c/aria-practices#2114
+    ],
+    // axe recognizes the aria-actions attribute (dequelabs/axe-core#5199) but
+    // not yet the authoring pattern: action controls associated via aria-actions
+    // still trip these structural rules. Tracked in dequelabs/axe-core#5215.
+    'tabs/examples/tabs-actions.html': ['aria-required-children'],
+    'listbox/examples/listbox-actions.html': ['nested-interactive'],
+    // all landmark pages have a sidebar link that uses the visible text label of
+    // "Asst. Tech." with an aria-label of "Assistive Technology" which fails
+    // the label-content-name-mismatch rule
+    'landmarks/examples/search.html': ['label-content-name-mismatch'],
+    'landmarks/examples/resources.html': ['label-content-name-mismatch'],
+    'landmarks/examples/region.html': ['label-content-name-mismatch'],
+    'landmarks/examples/navigation.html': ['label-content-name-mismatch'],
+    'landmarks/examples/main.html': ['label-content-name-mismatch'],
+    'landmarks/examples/general-principles.html': [
+      'label-content-name-mismatch'
+    ],
+    'landmarks/examples/form.html': ['label-content-name-mismatch'],
+    'landmarks/examples/contentinfo.html': ['label-content-name-mismatch'],
+    'landmarks/examples/complementary.html': ['label-content-name-mismatch'],
+    'landmarks/examples/banner.html': ['label-content-name-mismatch'],
+    'landmarks/examples/at.html': ['label-content-name-mismatch'],
+    'landmarks/examples/HTML5.html': ['label-content-name-mismatch']
+  };
+
+  const skippedPages = [
+    'toolbar/examples/help.html' // Embedded into another page
+  ];
+
+  it('finds examples', () => {
+    assert.isTrue(testFiles.length > 0);
+  });
+
+  testFiles
+    .filter(filePath => !skippedPages.includes(filePath))
+    .forEach(filePath => {
+      it(`finds no issue in "${filePath}"`, async () => {
+        await driver.get(`${addr}content/patterns/${filePath}`);
+
+        const builder = new AxeBuilder(driver, axeSource)
+          // Support table has no title and has duplicate ids
+          .exclude('#at-support')
+          .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+          .disableRules([
+            ...disabledRules['*'],
+            ...(disabledRules[filePath] || [])
+          ]);
+
+        const { violations } = await builder.analyze();
+        const issues = violations.map(({ id, nodes }) => ({
+          id,
+          issues: nodes.length
+        }));
+        assert.lengthOf(issues, 0, issues.map(({ id }) => id).join(', '));
+      });
+    });
+});

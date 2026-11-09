@@ -1,0 +1,400 @@
+/**
+ * Copyright 2025 Adobe. All rights reserved.
+ * This file is licensed to you under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License. You may obtain a copy
+ * of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+ * OF ANY KIND, either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
+ */
+
+import { readFileSync } from "fs";
+import { execFileSync } from "child_process";
+import { join, dirname, sep } from "path";
+import { globSync } from "glob";
+
+// Dataset-content globs that feed sdk/wasm's `cache-build` task (see sdk/wasm/moon.yml).
+// A change to any of these regenerates the embedded dataset at release time, so it must
+// be accompanied by a changeset that bumps WASM_PACKAGE — changesets' cascade
+// (updateInternalDependencies: "patch" in .changeset/config.json) then carries the bump
+// to every workspace:* dependent, including @adobe/design-data-agent-mcp.
+const DATASET_CONTENT_PATTERNS = [
+  /^packages\/design-data\/tokens\/[^/]+\.tokens\.json$/,
+  /^packages\/design-data\/mode-sets\/[^/]+\.json$/,
+  /^packages\/design-data\/components\/[^/]+\.json$/,
+  /^packages\/design-data\/fields\/[^/]+\.json$/,
+];
+
+const WASM_PACKAGE = "@adobe/design-data-wasm";
+
+/**
+ * Configuration for changeset linting rules
+ */
+const LINT_RULES = {
+  // Maximum lines for changeset content (excluding frontmatter)
+  maxLines: 20,
+
+  // Maximum line length for any single line
+  maxLineLength: 100,
+
+  // Patterns that indicate auto-generated diff content (exempt from length limits)
+  diffSectionPatterns: [
+    /## Tokens Changed/i,
+    /## Components Changed/i,
+    /## Component Schema Diff Report/i,
+    /Generated using `@adobe\/spectrum-component-diff-generator`/i,
+    /\*\*Original Branch:\*\*/i,
+    /\*\*New Branch:\*\*/i,
+    /\*\*Added \(\d+\)\*\*/i,
+    /\*\*Updated \(\d+\)\*\*/i,
+    /\*\*Deleted \(\d+\)\*\*/i,
+    /### Added Properties/i,
+    /### Updated Properties/i,
+    /### Deleted Properties/i,
+  ],
+
+  // Discouraged verbose patterns
+  discouragedPatterns: [
+    {
+      pattern: /## 🚀|## 📊|## 🎯|## 🔧/g,
+      message: "Avoid excessive emoji sections",
+    },
+    { pattern: /### ✅/g, message: "Avoid repetitive checkmark sections" },
+    {
+      pattern: /Business Impact|Technical Details/i,
+      message:
+        "Business/technical details belong in PR description, not changeset",
+    },
+    {
+      pattern: /Performance Metrics|Memory usage/i,
+      message: "Performance details should be in documentation, not changeset",
+    },
+  ],
+
+  // Required patterns for proper changesets
+  requiredPatterns: [
+    { pattern: /^---\s*$/m, message: "Missing frontmatter delimiters" },
+    {
+      pattern: /"[^"]+"\s*:\s*(major|minor|patch)/m,
+      message: "Missing package version changes",
+    },
+  ],
+};
+
+/**
+ * Walk up from startDir until a directory containing pnpm-workspace.yaml is found.
+ * @param {string} startDir
+ * @returns {string|null} workspace root path, or null if not found
+ */
+function findWorkspaceRoot(startDir) {
+  let dir = startDir;
+  while (true) {
+    try {
+      readFileSync(join(dir, "pnpm-workspace.yaml"));
+      return dir;
+    } catch {
+      const parent = dirname(dir);
+      if (parent === dir) return null; // filesystem root — give up
+      dir = parent;
+    }
+  }
+}
+
+/**
+ * Parse the `packages:` glob list from pnpm-workspace.yaml text.
+ * Uses line-by-line text parsing to avoid a YAML dep.
+ * @param {string} yamlContent
+ * @returns {string[]} array of glob patterns
+ */
+function parseWorkspaceGlobs(yamlContent) {
+  const globs = [];
+  let inPackages = false;
+  for (const line of yamlContent.split("\n")) {
+    if (/^packages:/.test(line)) {
+      inPackages = true;
+      continue;
+    }
+    if (inPackages) {
+      // Another top-level key ends the packages section
+      if (line.length > 0 && !/^\s/.test(line) && !line.startsWith("#")) {
+        inPackages = false;
+        continue;
+      }
+      const m = line.match(/^\s+-\s+["']?([^"'\s#]+)/);
+      if (m) globs.push(m[1]);
+    }
+  }
+  return globs;
+}
+
+/**
+ * Discover all npm package names present in the pnpm workspace.
+ * Uses `glob` (already a dependency) and reads each package.json "name" field.
+ * Returns an empty Set on any failure so callers degrade gracefully.
+ *
+ * @param {string} [cwd=process.cwd()] - directory to start searching from
+ * @returns {Promise<Set<string>>} set of workspace package names
+ */
+export async function getWorkspacePackageNames(cwd = process.cwd()) {
+  try {
+    const workspaceRoot = findWorkspaceRoot(cwd);
+    if (!workspaceRoot) return new Set();
+    const yamlContent = readFileSync(
+      join(workspaceRoot, "pnpm-workspace.yaml"),
+      "utf8",
+    );
+    const globs = parseWorkspaceGlobs(yamlContent);
+    const names = new Set();
+    for (const pattern of globs) {
+      // glob requires forward slashes; path.join may produce backslashes on Windows
+      const globPattern = join(
+        workspaceRoot,
+        pattern,
+        "package.json",
+      ).replaceAll(sep, "/");
+      const pkgJsonPaths = globSync(globPattern);
+      for (const pkgJsonPath of pkgJsonPaths) {
+        try {
+          const { name } = JSON.parse(readFileSync(pkgJsonPath, "utf8"));
+          if (name) names.add(name);
+        } catch {
+          /* skip malformed package.json */
+        }
+      }
+    }
+    return names;
+  } catch (err) {
+    // Warn on unexpected errors (import failures, permission issues, etc.) without
+    // blocking commits — the fail-safe is intentional, the noise is useful in dev.
+    console.warn(
+      `[changeset-linter] getWorkspacePackageNames failed: ${err.message}`,
+    );
+    return new Set();
+  }
+}
+
+/**
+ * Lint a changeset file for conciseness and proper format
+ * @param {string} filePath - Path to the changeset file
+ * @param {Set<string>} [validPackageNames] - workspace package names; when provided and
+ *   non-empty, any frontmatter package name absent from the set is reported as an error.
+ *   Omit (or pass an empty Set) to skip the check (preserves backward compatibility).
+ * @returns {Object} Linting results with errors and warnings
+ */
+export function lintChangeset(filePath, validPackageNames = new Set()) {
+  const content = readFileSync(filePath, "utf8");
+  const lines = content.split("\n");
+
+  const results = {
+    filePath,
+    errors: [],
+    warnings: [],
+    isValid: true,
+  };
+
+  // Extract frontmatter and content
+  const frontmatterEnd = findFrontmatterEnd(lines);
+  const contentLines = lines.slice(frontmatterEnd + 1);
+  const contentText = contentLines.join("\n");
+
+  // Check if this is a diff-generated changeset (exempt from most rules)
+  const isDiffGenerated = LINT_RULES.diffSectionPatterns.some((pattern) =>
+    pattern.test(contentText),
+  );
+
+  // Check required patterns
+  for (const rule of LINT_RULES.requiredPatterns) {
+    if (!rule.pattern.test(content)) {
+      results.errors.push(`Missing required pattern: ${rule.message}`);
+    }
+  }
+
+  // Validate frontmatter package names against the workspace (when a non-empty Set is supplied)
+  if (validPackageNames.size > 0) {
+    const frontmatterText = lines.slice(0, frontmatterEnd).join("\n");
+    const pkgNameRegex = /"([^"]+)"\s*:\s*(?:major|minor|patch)/g;
+    let match;
+    while ((match = pkgNameRegex.exec(frontmatterText)) !== null) {
+      const name = match[1];
+      if (!validPackageNames.has(name)) {
+        // Suggest the scoped variant when the bare name matches the suffix of a valid name
+        const suggestion = [...validPackageNames].find((v) =>
+          v.endsWith(`/${name}`),
+        );
+        const hint = suggestion ? ` — did you mean "${suggestion}"?` : "";
+        results.errors.push(`Unknown package "${name}" in frontmatter${hint}`);
+      }
+    }
+  }
+
+  // Skip length checks for diff-generated content
+  if (!isDiffGenerated) {
+    // Check total line count
+    if (contentLines.length > LINT_RULES.maxLines) {
+      results.warnings.push(
+        `Changeset is too long (${contentLines.length} lines). Consider keeping it under ${LINT_RULES.maxLines} lines. Move detailed explanations to PR description.`,
+      );
+    }
+
+    // Check individual line lengths
+    contentLines.forEach((line, index) => {
+      if (line.length > LINT_RULES.maxLineLength) {
+        results.warnings.push(
+          `Line ${frontmatterEnd + index + 2} is too long (${line.length} chars). Keep lines under ${LINT_RULES.maxLineLength} characters.`,
+        );
+      }
+    });
+
+    // Check for discouraged patterns
+    for (const rule of LINT_RULES.discouragedPatterns) {
+      const matches = contentText.match(rule.pattern);
+      if (matches) {
+        results.warnings.push(
+          `${rule.message} (found ${matches.length} occurrence${matches.length > 1 ? "s" : ""})`,
+        );
+      }
+    }
+  }
+
+  // Set overall validity
+  results.isValid = results.errors.length === 0;
+
+  return results;
+}
+
+/**
+ * Find the end of frontmatter section
+ * @param {string[]} lines - Array of file lines
+ * @returns {number} Index of frontmatter end
+ */
+function findFrontmatterEnd(lines) {
+  let frontmatterDelimiters = 0;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim() === "---") {
+      frontmatterDelimiters++;
+      if (frontmatterDelimiters === 2) {
+        return i;
+      }
+    }
+  }
+  return 0; // No frontmatter found
+}
+
+/**
+ * Lint all changeset files in a directory
+ * @param {string} changesetDir - Path to .changeset directory
+ * @returns {Promise<Object[]>} Array of linting results
+ */
+export async function lintAllChangesets(changesetDir = ".changeset") {
+  const pattern = join(changesetDir, "*.md").replaceAll(sep, "/");
+  const files = globSync(pattern);
+
+  // Filter out special changeset files
+  const changesetFiles = files.filter((file) => {
+    const basename = file.split("/").pop();
+    return basename !== "README.md" && basename !== "config.json";
+  });
+
+  // Discover valid workspace package names once and share across all files
+  const validPackageNames = await getWorkspacePackageNames();
+
+  return changesetFiles.map((f) => lintChangeset(f, validPackageNames));
+}
+
+/**
+ * Check whether a repo-relative path is dataset content that feeds the embedded
+ * wasm cache (see DATASET_CONTENT_PATTERNS above).
+ * @param {string} filePath - Repo-relative path (forward or platform-native slashes)
+ * @returns {boolean}
+ */
+export function isDatasetContentFile(filePath) {
+  const normalized = filePath.replaceAll(sep, "/");
+  return DATASET_CONTENT_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+/**
+ * Pure check: does this set of changed files require a pending changeset that bumps
+ * WASM_PACKAGE? Takes changeset file contents directly so it's testable without touching
+ * the filesystem or git.
+ * @param {string[]} changedFiles - Repo-relative paths from a git diff
+ * @param {string[]} changesetContents - Raw contents of pending .changeset/*.md files
+ * @returns {{ required: boolean, satisfied: boolean }}
+ */
+export function requireWasmBumpForDataChanges(changedFiles, changesetContents) {
+  const required = changedFiles.some(isDatasetContentFile);
+  if (!required) {
+    return { required: false, satisfied: true };
+  }
+  const bumpPattern = new RegExp(
+    `"${WASM_PACKAGE}"\\s*:\\s*(major|minor|patch)`,
+  );
+  // Only the frontmatter counts — a body example/discussion mentioning the package
+  // must not be able to satisfy the check (see findFrontmatterEnd below).
+  const satisfied = changesetContents.some((content) =>
+    bumpPattern.test(extractFrontmatter(content)),
+  );
+  return { required: true, satisfied };
+}
+
+/**
+ * Extract just the YAML frontmatter block from a changeset's raw content, excluding
+ * the prose body. Returns "" if no closed frontmatter block is found.
+ * @param {string} content - Raw changeset file content
+ * @returns {string}
+ */
+function extractFrontmatter(content) {
+  const lines = content.split("\n");
+  const frontmatterEnd = findFrontmatterEnd(lines);
+  return frontmatterEnd === 0 ? "" : lines.slice(0, frontmatterEnd).join("\n");
+}
+
+/**
+ * Repo-relative paths changed between `base` and HEAD.
+ * @param {string} base - Base git ref (e.g. a PR's base branch)
+ * @returns {string[]}
+ */
+export function getChangedFiles(base) {
+  const output = execFileSync(
+    "git",
+    ["diff", "--name-only", `${base}...HEAD`],
+    {
+      encoding: "utf8",
+    },
+  );
+  return output.split("\n").filter(Boolean);
+}
+
+/**
+ * Contents of changeset files added or modified by this diff (vs. `base`) — deliberately
+ * excludes changesets already sitting on the base branch, unrelated to this change. An
+ * unrelated pre-existing changeset that happens to bump WASM_PACKAGE must not be able to
+ * satisfy requireWasmBumpForDataChanges for a change it has nothing to do with; it will be
+ * consumed by the next release regardless, leaving this change unversioned.
+ * @param {string} base - Base git ref (e.g. a PR's base branch)
+ * @param {string} changesetDir - Path to .changeset directory
+ * @param {{ cwd?: string }} [options] - `cwd` to run git in (defaults to process.cwd();
+ *   exposed for testing against a scratch repo)
+ * @returns {string[]}
+ */
+export function getChangedChangesetContents(
+  base,
+  changesetDir = ".changeset",
+  { cwd } = {},
+) {
+  const output = execFileSync(
+    "git",
+    ["diff", "--name-only", "--diff-filter=ACMR", `${base}...HEAD`],
+    { encoding: "utf8", cwd },
+  );
+  const prefix = `${changesetDir}/`;
+  return output
+    .split("\n")
+    .filter(Boolean)
+    .filter((file) => file.startsWith(prefix) && file.endsWith(".md"))
+    .filter((file) => file.split("/").pop() !== "README.md")
+    .map((file) => readFileSync(cwd ? join(cwd, file) : file, "utf8"));
+}
+
+export { LINT_RULES, WASM_PACKAGE };

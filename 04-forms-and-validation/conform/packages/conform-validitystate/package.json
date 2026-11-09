@@ -1,0 +1,64 @@
+{
+	"name": "@conform-to/validitystate",
+	"description": "Validate on the server using the same rules as the browser",
+	"homepage": "https://conform.guide",
+	"license": "MIT",
+	"version": "0.2.0",
+	"main": "./dist/index.js",
+	"module": "./dist/index.mjs",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"module": "./dist/index.mjs",
+			"import": "./dist/index.mjs",
+			"require": "./dist/index.js",
+			"default": "./dist/index.mjs"
+		}
+	},
+	"files": [
+		"./dist/**/*.{js,mjs}",
+		"./dist/**/*.d.ts"
+	],
+	"scripts": {
+		"build:js": "rollup -c",
+		"build:ts": "tsc --project ./tsconfig.build.json",
+		"build": "pnpm run \"/^build:.*/\"",
+		"dev:js": "pnpm run build:js --watch",
+		"dev:ts": "pnpm run build:ts --watch",
+		"dev": "pnpm run \"/^dev:.*/\"",
+		"typecheck": "tsc"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/edmundhung/conform",
+		"directory": "packages/conform-validitystate"
+	},
+	"devDependencies": {
+		"@babel/core": "^7.17.8",
+		"@babel/preset-env": "^7.20.2",
+		"@babel/preset-typescript": "^7.20.2",
+		"@rollup/plugin-babel": "^5.3.1",
+		"@rollup/plugin-node-resolve": "^16.0.3",
+		"rollup-plugin-copy": "^3.4.0",
+		"rollup": "^2.80.0"
+	},
+	"author": {
+		"name": "Edmund Hung",
+		"email": "me@edmund.dev",
+		"url": "https://edmund.dev"
+	},
+	"bugs": {
+		"url": "https://github.com/edmundhung/conform/issues"
+	},
+	"keywords": [
+		"constraint-validation",
+		"form",
+		"form-validation",
+		"progressive-enhancement",
+		"validation",
+		"validitystate",
+		"dom"
+	],
+	"sideEffects": false
+}

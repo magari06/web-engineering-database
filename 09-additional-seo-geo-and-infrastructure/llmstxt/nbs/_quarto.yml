@@ -1,0 +1,40 @@
+project:
+  type: website
+  resources: 
+    - "*.txt"
+    - "*.html"
+  preview:
+    navigate: false
+    port: 3000
+
+format:
+  html:
+    code-overflow: wrap
+    theme: cosmo
+    css: styles.css
+    toc: true
+    keep-md: true
+  commonmark: default
+
+website:
+  favicon: favicon.ico
+  open-graph: true
+  repo-actions: [issue]
+  twitter-card:
+    creator: "@jeremyphoward"
+    site: "@answerdotai"
+    image: https://llmstxt.org/sample.png
+  navbar:
+    background: primary
+    search: true
+    right:
+      - icon: github
+        href: "https://github.com/answerdotai/llms-txt"
+      - icon: twitter
+        href: https://x.com/answerdotai
+        aria-label: Fast.ai Twitter
+  sidebar:
+    style: floating
+
+metadata-files: [nbdev.yml, sidebar.yml]
+

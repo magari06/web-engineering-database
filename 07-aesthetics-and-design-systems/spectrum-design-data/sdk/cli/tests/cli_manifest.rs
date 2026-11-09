@@ -1,0 +1,456 @@
+// Copyright 2026 Adobe. All rights reserved.
+// This file is licensed to you under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License. You may obtain a copy
+// of the License at http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under
+// the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+// OF ANY KIND, either express or implied. See the License for the specific language
+// governing permissions and limitations under the License.
+
+//! Integration tests for the Foundation→Platform manifest cascade wired through
+//! `.design-data.toml`'s top-level `manifest` key (epic #1047 Phase 2, #1053).
+
+use std::fs;
+use std::path::PathBuf;
+
+use assert_cmd::Command;
+use predicates::prelude::PredicateBooleanExt;
+use predicates::str::contains;
+use serde_json::json;
+
+/// Absolute path to the repo root (so the resolver can locate the spec schemas).
+fn repo_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .expect("repo root canonicalizes")
+}
+
+/// Create a temp project with a tokens dir, a platform manifest, and a
+/// `.design-data.toml` whose `[source]` points at the repo root with the manifest.
+fn setup_project(manifest: serde_json::Value) -> tempfile::TempDir {
+    let project = tempfile::tempdir().expect("temp project dir");
+    let tokens_dir = project.path().join("tokens");
+    fs::create_dir_all(&tokens_dir).expect("create tokens dir");
+
+    fs::write(
+        tokens_dir.join("tokens.json"),
+        json!({
+            "btn-bg": {"name": {"property": "background-color", "component": "button"}, "value": "#aaa", "uuid": "u-btn-bg"},
+            "btn-fg": {"name": {"property": "color", "component": "button"}, "value": "#111", "uuid": "u-btn-fg"},
+            "chk-bg": {"name": {"property": "background-color", "component": "checkbox"}, "value": "#bbb", "uuid": "u-chk-bg"}
+        })
+        .to_string(),
+    )
+    .expect("write tokens");
+
+    fs::write(
+        project.path().join("manifest.json"),
+        serde_json::to_string_pretty(&manifest).expect("serialize manifest"),
+    )
+    .expect("write manifest");
+
+    fs::write(
+        project.path().join(".design-data.toml"),
+        format!(
+            "manifest = \"manifest.json\"\n[source]\ntype = \"path\"\nroot = \"{}\"\n",
+            repo_root().display()
+        ),
+    )
+    .expect("write config");
+
+    project
+}
+
+/// Like [`setup_project`], but the `.design-data.toml` has no top-level `manifest`
+/// key — `manifest.json` is still written to the project root so a test can pass it
+/// explicitly via `--manifest`.
+fn setup_project_without_manifest_key(manifest: serde_json::Value) -> tempfile::TempDir {
+    let project = setup_project(manifest);
+    fs::write(
+        project.path().join(".design-data.toml"),
+        format!(
+            "[source]\ntype = \"path\"\nroot = \"{}\"\n",
+            repo_root().display()
+        ),
+    )
+    .expect("rewrite config without manifest key");
+    project
+}
+
+#[test]
+fn validate_manifest_accepts_valid_manifest() {
+    let project = setup_project(json!({
+        "specVersion": "1.0.0-draft",
+        "foundationVersion": "1.0.0",
+        "include": ["component=button"]
+    }));
+
+    Command::cargo_bin("design-data")
+        .expect("binary design-data")
+        .current_dir(project.path())
+        .args(["validate-manifest", "tokens"])
+        .assert()
+        .success()
+        .stdout(contains("valid"));
+}
+
+#[test]
+fn validate_manifest_rejects_schema_violation() {
+    // Missing required `foundationVersion` → Layer 1 schema validation fails.
+    let project = setup_project(json!({
+        "specVersion": "1.0.0-draft",
+        "include": ["component=button"]
+    }));
+
+    Command::cargo_bin("design-data")
+        .expect("binary design-data")
+        .current_dir(project.path())
+        .args(["validate-manifest", "tokens"])
+        .assert()
+        .code(1);
+}
+
+#[test]
+fn validate_manifest_rejects_unparseable_query() {
+    let project = setup_project(json!({
+        "specVersion": "1.0.0-draft",
+        "foundationVersion": "1.0.0",
+        "include": ["not-a-valid-query"]
+    }));
+
+    Command::cargo_bin("design-data")
+        .expect("binary design-data")
+        .current_dir(project.path())
+        .args(["validate-manifest", "tokens"])
+        .assert()
+        .code(1);
+}
+
+#[test]
+fn validate_manifest_errors_when_none_configured() {
+    let project = setup_project_without_manifest_key(json!({
+        "specVersion": "1.0.0-draft",
+        "foundationVersion": "1.0.0",
+        "include": ["component=button"]
+    }));
+
+    Command::cargo_bin("design-data")
+        .expect("binary design-data")
+        .current_dir(project.path())
+        .args(["validate-manifest", "tokens"])
+        .assert()
+        .code(2)
+        .stderr(contains("no platform manifest"));
+}
+
+#[test]
+fn validate_manifest_honors_explicit_flag() {
+    let project = setup_project_without_manifest_key(json!({
+        "specVersion": "1.0.0-draft",
+        "foundationVersion": "1.0.0",
+        "include": ["component=button"]
+    }));
+
+    Command::cargo_bin("design-data")
+        .expect("binary design-data")
+        .current_dir(project.path())
+        .args(["validate-manifest", "tokens", "--manifest", "manifest.json"])
+        .assert()
+        .success()
+        .stdout(contains("valid"));
+}
+
+#[test]
+fn validate_manifest_rejects_bad_fragment() {
+    // A schema-invalid extensions/ fragment (h890.26.3) must fail the same way
+    // an inline `extensions` schema violation used to before h890.26.1, naming
+    // the offending fragment file rather than just "manifest invalid". Drives
+    // the shared manifest-extensions/invalid/component-missing-name
+    // conformance fixture directly rather than hand-writing an equivalent
+    // broken fragment in the temp project.
+    let project = setup_project_without_manifest_key(json!({
+        "specVersion": "1.0.0-draft",
+        "foundationVersion": "1.0.0"
+    }));
+
+    let fixture_manifest = repo_root().join(
+        "packages/design-data-spec/conformance/manifest-extensions/invalid/component-missing-name/manifest.json",
+    );
+
+    Command::cargo_bin("design-data")
+        .expect("binary design-data")
+        .current_dir(project.path())
+        .args([
+            "validate-manifest",
+            "tokens",
+            "--manifest",
+            fixture_manifest
+                .to_str()
+                .expect("fixture path is valid UTF-8"),
+        ])
+        .assert()
+        .code(1)
+        .stderr(contains("broken.json"));
+}
+
+#[test]
+fn query_applies_manifest_include_filter() {
+    let project = setup_project(json!({
+        "specVersion": "1.0.0-draft",
+        "foundationVersion": "1.0.0",
+        "include": ["component=button"]
+    }));
+
+    // Empty filter matches everything that survives the manifest cascade.
+    Command::cargo_bin("design-data")
+        .expect("binary design-data")
+        .current_dir(project.path())
+        .args(["query", "tokens", "--filter", "", "--count"])
+        .assert()
+        .success()
+        // 3 foundation tokens → 2 after include=component=button.
+        .stdout(predicates::str::starts_with("2"));
+}
+
+#[test]
+fn query_rejects_manifest_with_unparseable_query() {
+    let project = setup_project(json!({
+        "specVersion": "1.0.0-draft",
+        "foundationVersion": "1.0.0",
+        "include": ["not-a-valid-query"]
+    }));
+
+    Command::cargo_bin("design-data")
+        .expect("binary design-data")
+        .current_dir(project.path())
+        .args(["query", "tokens", "--filter", "", "--count"])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn query_rejects_manifest_failing_schema_validation() {
+    // Missing required `foundationVersion` → Layer 1 schema validation fails.
+    let project = setup_project(json!({
+        "specVersion": "1.0.0-draft",
+        "include": ["component=button"]
+    }));
+
+    Command::cargo_bin("design-data")
+        .expect("binary design-data")
+        .current_dir(project.path())
+        .args(["query", "tokens", "--filter", "", "--count"])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn migrate_legacy_output_cascaded_prefers_override_over_shadowed_foundation() {
+    // Regression for spectrum-design-data-h890.10: `apply_platform_manifest`
+    // inserts an override as a NEW Platform-layer TokenRecord under a
+    // synthetic key, leaving the original Foundation-layer record (same
+    // uuid) in place. `migrate legacy-output-cascaded` must emit only the
+    // override's value, deterministically — not whichever copy `HashMap`
+    // iteration visits last.
+    let project = setup_project(json!({
+        "specVersion": "1.0.0-draft",
+        "foundationVersion": "1.0.0",
+        "overrides": [{"target": "u-btn-bg", "value": "#ffffff"}]
+    }));
+    let output = project.path().join("legacy.json");
+
+    Command::cargo_bin("design-data")
+        .expect("binary design-data")
+        .current_dir(project.path())
+        .args(["migrate", "legacy-output-cascaded", "tokens", "--output"])
+        .arg(&output)
+        .assert()
+        .success();
+
+    let legacy: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&output).expect("read output"))
+            .expect("parse output");
+    assert_eq!(legacy["button-background-color"]["value"], "#ffffff");
+}
+
+#[test]
+fn resolve_applies_manifest_override_by_uuid() {
+    let project = setup_project(json!({
+        "specVersion": "1.0.0-draft",
+        "foundationVersion": "1.0.0",
+        "overrides": [{"target": "u-btn-bg", "value": "#ffffff"}]
+    }));
+
+    Command::cargo_bin("design-data")
+        .expect("binary design-data")
+        .current_dir(project.path())
+        .args(["resolve", "background-color", "tokens", "--format", "json"])
+        .assert()
+        .success()
+        .stdout(contains("#ffffff"));
+}
+
+/// A project whose only recipe binds `component-height-100`, plus the given manifest.
+fn setup_recipe_project(manifest: serde_json::Value) -> tempfile::TempDir {
+    let project = setup_project(manifest);
+    for dir in ["components", "visuals"] {
+        fs::create_dir_all(project.path().join(dir)).expect("create dir");
+    }
+    fs::write(
+        project.path().join("tokens/tokens.json"),
+        json!({
+            "h": {"name": {"property": "component-height-100"}, "value": "32px", "uuid": "u-h"}
+        })
+        .to_string(),
+    )
+    .expect("write tokens");
+    fs::write(
+        project.path().join("components/button.json"),
+        json!({
+            "$id": "https://opensource.adobe.com/spectrum-design-data/schemas/v0/components/button.json",
+            "name": "button",
+            "displayName": "Button",
+            "meta": {"category": "actions", "documentationUrl": "https://spectrum.adobe.com/page/button/"},
+            "anatomy": [{"name": "container", "description": "Background.", "required": true}],
+            "options": {"size": {"type": "string", "default": "m", "values": [{"value": "m"}]}}
+        })
+        .to_string(),
+    )
+    .expect("write component");
+    fs::write(
+        project.path().join("visuals/button.json"),
+        json!({
+            "component": "button", "root": "container", "sizeScale": {"m": 100},
+            "parts": {"container": {"kind": "box", "props": {
+                "height": {"token": {"property": "component-height-100"}}}}}
+        })
+        .to_string(),
+    )
+    .expect("write recipe");
+    project
+}
+
+fn validate_recipes(project: &tempfile::TempDir) -> assert_cmd::assert::Assert {
+    Command::cargo_bin("design-data")
+        .expect("binary design-data")
+        .current_dir(project.path())
+        .args([
+            "validate",
+            "tokens",
+            "--components-path",
+            "components",
+            "--visuals-path",
+            "visuals",
+            "--format",
+            "json",
+        ])
+        .assert()
+}
+
+#[test]
+fn validate_warns_when_the_platform_drops_a_bound_token() {
+    let project = setup_recipe_project(json!({
+        "specVersion": "1.0.0-draft",
+        "foundationVersion": "1.0.0",
+        "platform": "fixture-drop",
+        "exclude": ["property=component-height-100"]
+    }));
+    // The temp tokens carry no `$schema`, so the run fails on unrelated Layer 1 errors; only
+    // the SPEC-076 diagnostics matter here.
+    validate_recipes(&project)
+        .stdout(contains("SPEC-076"))
+        .stdout(contains("fixture-drop"));
+}
+
+#[test]
+fn validate_stays_quiet_when_the_platform_keeps_every_binding() {
+    let project = setup_recipe_project(json!({
+        "specVersion": "1.0.0-draft",
+        "foundationVersion": "1.0.0",
+        "platform": "fixture-keep"
+    }));
+    // The temp tokens carry no `$schema`, so the run fails on unrelated Layer 1 errors; only
+    // the SPEC-076 diagnostics matter here.
+    validate_recipes(&project)
+        .stdout(contains("SPEC-076").not())
+        .stdout(contains("SPEC-082").not());
+}
+
+/// p6ga.8.52: a manifest that cannot apply (here it extends a mode set that does not exist) is
+/// a SPEC-082 error, not a silent pass with the platform rules skipped.
+#[test]
+fn validate_reports_a_platform_manifest_that_cannot_apply() {
+    let project = setup_recipe_project(json!({
+        "specVersion": "1.0.0-draft",
+        "foundationVersion": "1.0.0",
+        "platform": "fixture-broken"
+    }));
+    let dir = project.path().join("extensions/platform-extensions");
+    fs::create_dir_all(&dir).expect("extensions dir");
+    fs::write(
+        dir.join("broken.json"),
+        json!({
+            "platform": "fixture-broken",
+            "extends": "no-such-mode-set",
+            "extensions": [{ "termId": "x", "platformTerm": "y" }]
+        })
+        .to_string(),
+    )
+    .expect("write platform extension");
+    validate_recipes(&project)
+        .stdout(contains("SPEC-082"))
+        .stdout(contains("fixture-broken"))
+        .stdout(contains("no-such-mode-set"));
+}
+
+/// Foundation recipes load first, then the manifest's `extensions/visuals/button.json`
+/// replaces the `button` recipe. Returns the `validate` report as JSON.
+fn validate_with_platform_recipe(property: &str) -> serde_json::Value {
+    let project = setup_recipe_project(json!({
+        "specVersion": "1.0.0-draft",
+        "foundationVersion": "1.0.0",
+        "platform": "fixture-replace"
+    }));
+    let dir = project.path().join("extensions/visuals");
+    fs::create_dir_all(&dir).expect("create visuals dir");
+    fs::write(
+        dir.join("button.json"),
+        json!({
+            "component": "button", "root": "container", "sizeScale": {"m": 100},
+            "parts": {"container": {"kind": "box", "props": {
+                "height": {"token": {"property": property}}}}}
+        })
+        .to_string(),
+    )
+    .expect("write platform recipe");
+    // The temp tokens carry no `$schema`, so the run exits 1 on unrelated Layer 1 errors; the
+    // report is still printed.
+    let out = validate_recipes(&project).get_output().stdout.clone();
+    serde_json::from_slice(&out).expect("validate prints a JSON report")
+}
+
+fn count_rule(report: &serde_json::Value, key: &str, rule: &str) -> usize {
+    report[key]
+        .as_array()
+        .expect("diagnostic list")
+        .iter()
+        .filter(|d| d["rule_id"] == rule)
+        .count()
+}
+
+#[test]
+fn validate_reports_a_platform_recipe_that_replaces_the_foundation_recipe() {
+    let report = validate_with_platform_recipe("component-height-100");
+    assert_eq!(count_rule(&report, "warnings", "SPEC-080"), 1, "{report}");
+    assert_eq!(count_rule(&report, "warnings", "SPEC-079"), 0, "{report}");
+    assert_eq!(count_rule(&report, "errors", "SPEC-060"), 0, "{report}");
+}
+
+#[test]
+fn validate_warns_when_a_platform_recipe_does_not_resolve() {
+    let report = validate_with_platform_recipe("component-missing-100");
+    assert!(count_rule(&report, "warnings", "SPEC-079") > 0, "{report}");
+    assert_eq!(count_rule(&report, "errors", "SPEC-079"), 0, "{report}");
+}

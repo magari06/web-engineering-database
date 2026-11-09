@@ -1,0 +1,68 @@
+name: Consumer test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+env:
+  TEST_FOLDER: primer-brand
+
+jobs:
+  changes:
+    uses: ./.github/workflows/hasChanged.yml
+
+  test:
+    needs: changes
+    if: ${{ github.repository == 'primer/primitives' && needs.changes.outputs.outputAffected == 'true' }}
+    name: Primer Brand
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "Re-enable this workflow when primer/brand has been updated to latest tokens"
+      # - name: Checkout current repo
+      #   uses: actions/checkout@v4
+
+      # - name: Checkout Primer Brand repo
+      #   uses: actions/checkout@v4
+      #   with:
+      #     repository: primer/brand
+      #     path: ${{env.TEST_FOLDER}}
+
+      # - name: Set up Node
+      #   uses: actions/setup-node@v4
+      #   with:
+      #     node-version: 22
+
+      # - name: Caching dependencies
+      #   uses: actions/cache@v4
+      #   with:
+      #     path: ~/.npm
+      #     key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+      #     restore-keys: |
+      #       ${{ runner.os }}-node-
+
+      # - name: Install local dependencies
+      #   run: npm install --legacy-peer-deps --ignore-scripts
+
+      # - name: Install consumer dependencies (reference)
+      #   run: pushd ${{env.TEST_FOLDER}}; npm install --legacy-peer-deps; popd
+
+      # - name: Build and pack
+      #   run: npm pack
+
+      # - name: Retrieving package version
+      #   id: package-version
+      #   uses: martinbeentjes/npm-get-version-action@main
+
+      # - name: Installing local build
+      #   run: |
+      #     cd ${{env.TEST_FOLDER}}
+      #     cp ../primer-primitives-${{ steps.package-version.outputs.current-version}}.tgz ./
+      #     cp ../primer-primitives-${{ steps.package-version.outputs.current-version}}.tgz ./packages/design-tokens
+      #     npm install primer-primitives-${{steps.package-version.outputs.current-version}}.tgz --workspace packages/design-tokens
+
+      # - name: Build consumer tokens
+      #   run: pushd ${{env.TEST_FOLDER}}; npm run build --workspace=packages/design-tokens; popd

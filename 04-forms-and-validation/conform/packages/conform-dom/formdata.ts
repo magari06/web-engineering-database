@@ -1,0 +1,1110 @@
+import type {
+	FormError,
+	FormValue,
+	FieldName,
+	JsonPrimitive,
+	CustomSerialize,
+	Submission,
+	SubmissionResult,
+	UnknownObject,
+	Serialize,
+	StandardSchemaError,
+	CustomError,
+} from './types';
+import { isGlobalInstance, isSubmitter } from './dom';
+import { deepEqual, getTypeName, isPlainObject, stripFiles } from './util';
+import { formatIssues } from './standard-schema';
+
+export const DEFAULT_INTENT_NAME = '__INTENT__';
+
+/**
+ * Returns whether an error payload contains a meaningful value.
+ * Empty strings and empty arrays are treated as no error.
+ */
+export function hasError<ErrorShape>(
+	error: ErrorShape | null | undefined,
+): error is ErrorShape {
+	return (
+		error != null && error !== '' && (!Array.isArray(error) || error.length > 0)
+	);
+}
+
+/**
+ * Normalizes a form error object by removing empty error payloads such as
+ * empty strings and empty arrays.
+ *
+ * Returns `null` when no form-level or field-level errors remain.
+ */
+export function normalizeFormError<ErrorShape>(
+	error: CustomError<ErrorShape> | null,
+): FormError<ErrorShape> | null {
+	if (error === null) {
+		return null;
+	}
+
+	const formErrors = hasError(error.formErrors) ? error.formErrors : null;
+	const fieldErrors = Object.entries(error.fieldErrors ?? {}).reduce<
+		Record<string, ErrorShape | null>
+	>((result, [name, value]) => {
+		if (hasError(value)) {
+			result[name] = value;
+		}
+
+		return result;
+	}, {});
+
+	if (formErrors === null && Object.keys(fieldErrors).length === 0) {
+		return null;
+	}
+
+	return {
+		formErrors,
+		fieldErrors,
+	};
+}
+
+/**
+ * Construct a form data with the submitter value.
+ * It utilizes the submitter argument on the FormData constructor from modern browsers
+ * with fallback to append the submitter value in case it is not unsupported.
+ *
+ * See https://developer.mozilla.org/en-US/docs/Web/API/FormData/FormData#parameters
+ */
+export function getFormData(
+	form: HTMLFormElement,
+	submitter?: HTMLElement | null,
+): FormData {
+	const payload = new FormData(form, submitter);
+
+	if (submitter) {
+		if (!isSubmitter(submitter)) {
+			throw new TypeError(
+				'The submitter must be an input or button element with type submit.',
+			);
+		}
+
+		if (submitter.name) {
+			const entries = payload.getAll(submitter.name);
+
+			// This assumes the submitter value to be always unique, which should be fine in most cases
+			if (!entries.includes(submitter.value)) {
+				payload.append(submitter.name, submitter.value);
+			}
+		}
+	}
+
+	return payload;
+}
+
+/**
+ * Convert a string path into an array of segments.
+ *
+ * **Example:**
+ * ```js
+ * parsePath("object.key");       // → ['object', 'key']
+ * parsePath("array[0].content"); // → ['array', 0, 'content']
+ * parsePath("todos[]");          // → ['todos', '']
+ * ```
+ */
+export function parsePath(path: string | undefined): Array<string | number> {
+	if (!path) return [];
+
+	const tokenRegex = /([^.[\]]+)|\[(\d*)\]/g;
+	const segments: Array<string | number> = [];
+
+	let lastIndex = 0,
+		match: RegExpExecArray | null;
+
+	while ((match = tokenRegex.exec(path))) {
+		// allow a single “.” between tokens
+		if (match.index !== lastIndex) {
+			if (!(match.index === lastIndex + 1 && path[lastIndex] === '.')) {
+				throw new Error(
+					`Invalid path syntax at position ${lastIndex} in "${path}"`,
+				);
+			}
+		}
+
+		const [, key, index] = match;
+		if (key !== undefined) {
+			if (key === '__proto__' || key === 'constructor') {
+				throw new Error(`Invalid path segment "${key}"`);
+			}
+			segments.push(key);
+		} else if (index === '') {
+			segments.push('');
+		} else {
+			const number = Number(index);
+			if (!Number.isInteger(number) || number < 0) {
+				throw new Error(
+					`Invalid path segment: array index must be a non-negative integer, got ${number}`,
+				);
+			}
+			segments.push(number);
+		}
+
+		lastIndex = tokenRegex.lastIndex;
+	}
+
+	if (lastIndex !== path.length) {
+		throw new Error(
+			`Invalid path syntax at position ${lastIndex} in "${path}"`,
+		);
+	}
+
+	return segments;
+}
+
+/**
+ * Returns a formatted name from the path segments based on the dot and bracket notation.
+ *
+ * **Example:**
+ * ```js
+ * formatPath(['object', 'key']); // → "object.key"
+ * formatPath(['array', 0, 'content']); // → "array[0].content"
+ * formatPath(['todos', '']); // → "todos[]"
+ * ```
+ */
+export function formatPath(segments: Readonly<Array<string | number>>): string {
+	return segments.reduce<string>(
+		(path, segment) => appendPath(path, segment),
+		'',
+	);
+}
+
+/**
+ * Append one more segment onto an existing path string.
+ *
+ * - segment = `undefined`  ⇒ no-op
+ * - segment = `""`         ⇒ empty brackets "[]"
+ * - segment = `number`     ⇒ bracket notation "[n]"
+ * - segment = `string`     ⇒ dot-notation ".prop"
+ */
+export function appendPath(
+	path: string | undefined,
+	segment: string | number | undefined,
+): string {
+	const base = path ?? '';
+
+	// 1) nothing to append
+	if (typeof segment === 'undefined') {
+		return base;
+	}
+
+	// 2) explicit empty-segment => empty bracket
+	if (segment === '') {
+		// even as first segment, "[]" is valid
+		return `${base}[]`;
+	}
+
+	// 3) numeric index => [n]
+	if (typeof segment === 'number') {
+		return `${base}[${segment}]`;
+	}
+
+	// 4) non-empty string => .prop (no leading dot if no base)
+	return base ? `${base}.${segment}` : segment;
+}
+
+/**
+ * Returns true if `prefix` is a valid leading path of `name`.
+ *
+ * **Example:**
+ * ```js
+ * isPathPrefix("foo.bar.baz", "foo.bar")        // → true
+ * isPathPrefix("foo.bar[3].baz", "foo.bar[3]")  // → true
+ * isPathPrefix("foo.bar[3].baz", "foo.bar")     // → true
+ * isPathPrefix("foo.bar[3].baz", "foo.baz")     // → false
+ * isPathPrefix("foo", "foo.bar")                // → false
+ * ```
+ */
+export function isPathPrefix(name: string, prefix: string) {
+	return getRelativePath(name, parsePath(prefix)) !== null;
+}
+
+/**
+ * Return the segments of `fullPath` that come after the `basePath` prefix.
+ *
+ * @param fullPath     Full path as a dot/bracket string or array of segments
+ * @param basePath     Base path as a dot/bracket string or array of segments
+ * @returns               The “tail” segments, or `null` if `fullPath` isn’t nested under `basePath`
+ *
+ * **Example:**
+ * ```js
+ * getRelativePath("foo.bar[0].qux", ["foo","bar"])  // → [0, "qux"]
+ * getRelativePath("a.b.c.d", ["a","b"])             // → ["c","d"]
+ * getRelativePath("foo", ["foo","bar"])             // → null
+ * ```
+ */
+export function getRelativePath(
+	fullPath: string | Array<string | number>,
+	basePath: string | Array<string | number>,
+): Array<string | number> | null {
+	const fullPathSegments =
+		typeof fullPath === 'string' ? parsePath(fullPath) : fullPath;
+	const basePathSegments =
+		typeof basePath === 'string' ? parsePath(basePath) : basePath;
+
+	// if full is at least as long *and* starts with the base…
+	if (
+		fullPathSegments.length >= basePathSegments.length &&
+		basePathSegments.every((segment, i) => segment === fullPathSegments[i])
+	) {
+		return fullPathSegments.slice(basePathSegments.length);
+	}
+
+	return null;
+}
+
+/**
+ * Assign a value to a target object by following the path segments.
+ */
+export function setPathValue<T extends Record<string, any>>(
+	target: T,
+	pathOrSegments: string | Array<string | number>,
+	valueOrFn: unknown | ((current: unknown) => unknown),
+	options: { mutate?: boolean; silent?: boolean } = {},
+): T {
+	try {
+		// 1) normalize + validate path
+		const segments: Array<string | number> =
+			typeof pathOrSegments === 'string'
+				? parsePath(pathOrSegments)
+				: pathOrSegments;
+
+		if (segments.length === 0) {
+			throw new Error('Cannot set value at the object root');
+		}
+
+		if (
+			segments.some((segment, i) => segment === '' && i < segments.length - 1)
+		) {
+			throw new Error(
+				`Empty brackets '[]' only allowed at end of path ("${pathOrSegments}")`,
+			);
+		}
+
+		// 2) clone root unless mutation is explicitly requested
+		const result = options.mutate ? target : { ...target };
+		let pointer: any = result;
+
+		// 3) drill down, cloning ancestors unless mutation is explicitly requested
+		for (let i = 0; i < segments.length - 1; i++) {
+			const currentSegment = segments[i] as string | number;
+			const nextSegment = segments[i + 1] as string | number;
+			let child = pointer[currentSegment];
+
+			if (Array.isArray(child)) {
+				child = options.mutate ? child : child.slice();
+			} else if (isPlainObject(child)) {
+				child = options.mutate ? child : { ...child };
+			} else {
+				child = typeof nextSegment === 'number' || nextSegment === '' ? [] : {};
+			}
+
+			pointer[currentSegment] = child;
+			pointer = child;
+		}
+
+		// 4) final set or push
+		const last = segments[segments.length - 1] as string | number;
+		const oldValue = pointer[last];
+		const newValue =
+			typeof valueOrFn === 'function' ? valueOrFn(oldValue) : valueOrFn;
+
+		if (last === '') {
+			if (!Array.isArray(pointer)) {
+				throw new Error(`Cannot push to non-array at "${pathOrSegments}"`);
+			}
+			pointer.push(newValue);
+		} else {
+			pointer[last] = newValue;
+		}
+
+		return result;
+	} catch (err) {
+		if (options?.silent) {
+			return target;
+		}
+
+		throw err;
+	}
+}
+
+/**
+ * Retrive the value from a target object by following the path segments.
+ */
+export function getPathValue(
+	target: unknown,
+	pathOrSegments: string | Array<string | number>,
+): unknown {
+	let pointer: any = target;
+
+	const segments =
+		typeof pathOrSegments === 'string'
+			? parsePath(pathOrSegments)
+			: pathOrSegments;
+
+	for (const segment of segments) {
+		if (segment === '') {
+			throw new Error(
+				`Cannot access empty segment "[]" in "${pathOrSegments}"`,
+			);
+		}
+
+		if (
+			pointer == null ||
+			!Object.prototype.hasOwnProperty.call(pointer, segment)
+		) {
+			return undefined;
+		}
+
+		pointer = pointer[segment];
+	}
+
+	return pointer;
+}
+
+/**
+ * Parse `FormData` or `URLSearchParams` into a submission object.
+ * This function structures the form values based on the naming convention.
+ * It also includes all the field names and extracts the intent from the submission.
+ *
+ * See https://conform.guide/api/react/future/parseSubmission
+ *
+ * **Example:**
+ * ```ts
+ * const formData = new FormData();
+ *
+ * formData.append('email', 'test@example.com');
+ * formData.append('password', 'secret');
+ *
+ * parseSubmission(formData)
+ * // {
+ * //   payload: { email: 'test@example.com', password: 'secret' },
+ * //   fields: ['email', 'password'],
+ * //   intent: null,
+ * // }
+ *
+ * // If you have an intent field
+ * formData.append('intent', 'login');
+ * parseSubmission(formData, { intentName: 'intent' })
+ * // {
+ * //   payload: { email: 'test@example.com', password: 'secret' },
+ * //   fields: ['email', 'password'],
+ * //   intent: 'login',
+ * // }
+ * ```
+ */
+export function parseSubmission(
+	formData: FormData | URLSearchParams,
+	options?: {
+		/**
+		 * The name of the submit button field that indicates the submission intent.
+		 * Defaults to `__INTENT__`.
+		 */
+		intentName?: string | undefined;
+		/**
+		 * A function to exclude specific form fields from being parsed.
+		 * Return `true` to skip the entry.
+		 */
+		skipEntry?: ((name: string) => boolean) | undefined;
+	},
+): Submission {
+	const intentName = options?.intentName ?? DEFAULT_INTENT_NAME;
+	const submission: Submission = {
+		payload: {},
+		fields: [],
+		intent: null,
+	};
+
+	const segmentsByName = new Map<string, Array<string | number> | null>();
+	let intentValue: string | null | undefined = undefined;
+
+	for (const [name, entryValue] of formData) {
+		if (name === intentName) {
+			if (intentValue === undefined) {
+				intentValue = typeof entryValue === 'string' ? entryValue : null;
+			}
+
+			continue;
+		}
+
+		let segments = segmentsByName.get(name);
+		let isArrayField = segments != null;
+
+		// If segments are not cached for this name, parse and cache them
+		if (segments === undefined) {
+			if (options?.skipEntry?.(name)) {
+				// If the entry should be skipped, mark its segments as null
+				segments = null;
+			} else {
+				segments = parsePath(name);
+				// If the name ends with empty brackets "[]", treat it as an array field and push values into an array
+				isArrayField =
+					segments.length > 0 && segments[segments.length - 1] === '';
+
+				if (isArrayField) {
+					segments = segments.slice(0, -1);
+				}
+
+				submission.fields.push(name);
+			}
+
+			segmentsByName.set(name, segments);
+		}
+
+		if (segments === null) {
+			continue;
+		}
+
+		setPathValue(
+			submission.payload,
+			segments,
+			(current: unknown) => {
+				if (Array.isArray(current)) {
+					current.push(entryValue);
+					return current;
+				}
+
+				if (current !== undefined) {
+					return [current, entryValue];
+				}
+
+				return isArrayField ? [entryValue] : entryValue;
+			},
+			{
+				mutate: true,
+				silent: true, // Avoid errors if the path is invalid
+			},
+		);
+	}
+
+	if (intentValue != null) {
+		submission.intent = intentValue;
+	}
+
+	return submission;
+}
+
+/**
+ * Creates a SubmissionResult object from a submission, adding validation results and target values.
+ * This function will remove all files in the submission payload by default since
+ * file inputs cannot be initialized with files.
+ * You can specify `keepFiles: true` to keep the files if needed.
+ *
+ * See https://conform.guide/api/react/future/report
+ *
+ * **Example:**
+ * ```ts
+ * // Report the submission with the field errors
+ * report(submission, {
+ *  error: {
+ *    fieldErrors: {
+ *      email: ['Invalid email format'],
+ *      password: ['Password is required'],
+ *    },
+ * })
+ *
+ * // Report the submission with a form error
+ * report(submission, {
+ *   error: {
+ *     formErrors: ['Invalid credentials'],
+ *   },
+ * })
+ *
+ * // Reset the form
+ * report(submission, {
+ *   reset: true,
+ * })
+ * ```
+ */
+export function report(
+	submission: Submission,
+	options?: {
+		keepFiles?: false;
+		error?: null;
+		targetValue?: Record<string, FormValue> | null;
+		hideFields?: string[];
+		reset?: boolean;
+	},
+): SubmissionResult<never, Exclude<JsonPrimitive | FormDataEntryValue, File>>;
+export function report(
+	submission: Submission,
+	options: {
+		keepFiles: true;
+		error?: null;
+		targetValue?: Record<string, FormValue> | null;
+		hideFields?: string[];
+		reset?: boolean;
+	},
+): SubmissionResult<never>;
+export function report<ErrorShape>(
+	submission: Submission,
+	options: {
+		keepFiles?: false;
+		error: CustomError<ErrorShape> | null;
+		targetValue?: Record<string, FormValue> | null;
+		hideFields?: string[];
+		reset?: boolean;
+	},
+): SubmissionResult<
+	ErrorShape,
+	Exclude<JsonPrimitive | FormDataEntryValue, File>
+>;
+export function report<ErrorShape>(
+	submission: Submission,
+	options: {
+		keepFiles: true;
+		error: CustomError<ErrorShape> | null;
+		targetValue?: Record<string, FormValue> | null;
+		hideFields?: string[];
+		reset?: boolean;
+	},
+): SubmissionResult<ErrorShape>;
+export function report(
+	submission: Submission,
+	options: {
+		keepFiles?: false;
+		error: StandardSchemaError;
+		targetValue?: Record<string, FormValue> | null;
+		hideFields?: string[];
+		reset?: boolean;
+	},
+): SubmissionResult<
+	string[],
+	Exclude<JsonPrimitive | FormDataEntryValue, File>
+>;
+export function report(
+	submission: Submission,
+	options: {
+		keepFiles: true;
+		error: StandardSchemaError;
+		targetValue?: Record<string, FormValue> | null;
+		hideFields?: string[];
+		reset?: boolean;
+	},
+): SubmissionResult<string[]>;
+export function report<ErrorShape>(
+	submission: Submission,
+	options?: {
+		keepFiles?: boolean;
+		error?: CustomError<ErrorShape> | null;
+		targetValue?: Record<string, FormValue> | null;
+		hideFields?: string[];
+		reset?: boolean;
+	},
+): SubmissionResult<ErrorShape>;
+export function report<ErrorShape>(
+	submission: Submission,
+	options: {
+		/**
+		 * Controls whether file objects are preserved in the submission payload.
+		 * Defaults to `false` - files are stripped since they cannot be used to initialize file inputs.
+		 */
+		keepFiles?: boolean;
+		/**
+		 * Error information to include in the result.
+		 * Set to `null` to indicate validation passed with no errors.
+		 */
+		error?: StandardSchemaError | CustomError<ErrorShape> | null;
+		/**
+		 * The target form value to apply. Use this to update the form or reset it
+		 * to a specific value when combined with `reset: true`.
+		 */
+		targetValue?: Record<string, FormValue> | null;
+		/**
+		 * Array of field names to hide from the result by setting them to `undefined`.
+		 * Primarily used for sensitive data like passwords that should not be sent back to the client.
+		 */
+		hideFields?: string[];
+		/**
+		 * Indicates whether the form should be reset to its initial state.
+		 */
+		reset?: boolean;
+	} = {},
+): SubmissionResult<string[] | ErrorShape | never> {
+	let error: FormError<string[] | ErrorShape> | null | undefined;
+
+	if (options.error == null) {
+		error = options.error;
+	} else if ('issues' in options.error) {
+		error = formatIssues(options.error.issues ?? []);
+	} else {
+		error = normalizeFormError(options.error);
+	}
+
+	const targetValue =
+		typeof options.targetValue === 'undefined' ||
+		(submission.payload === options.targetValue && !options.reset)
+			? undefined
+			: options.targetValue && !options.keepFiles
+				? stripFiles(options.targetValue)
+				: (options.targetValue ?? {});
+
+	if (options.hideFields) {
+		for (const name of options.hideFields) {
+			const path = parsePath(name);
+
+			setPathValue(submission.payload, path, undefined, { mutate: true });
+			if (targetValue) {
+				setPathValue(targetValue, path, undefined, { mutate: true });
+			}
+		}
+	}
+
+	return {
+		submission: options.keepFiles
+			? submission
+			: {
+					...submission,
+					payload: stripFiles(submission.payload),
+				},
+		reset: options.reset,
+		targetValue,
+		error,
+	};
+}
+
+/**
+ * A utility function that checks whether the current form data differs from the default values.
+ *
+ * See https://conform.guide/api/react/future/isDirty
+ *
+ * **Example: Enable a submit button only if the form is dirty**
+ *
+ * ```tsx
+ * const dirty = useFormData(
+ *   formRef,
+ *   (formData) => isDirty(formData, { defaultValue }) ?? false,
+ * );
+ *
+ * return (
+ *   <button type="submit" disabled={!dirty}>
+ *     Save changes
+ *   </button>
+ * );
+ * ```
+ */
+export function isDirty(
+	/**
+	 * The current form data to compare. It can be:
+	 *
+	 * - A `FormData` object
+	 * - A `URLSearchParams` object
+	 * - A plain object that was parsed from form data (i.e. `submission.payload`)
+	 */
+	formData: FormData | URLSearchParams | FormValue | null,
+	options?: {
+		/**
+		 * An object representing the default values of the form to compare against.
+		 * Defaults to an empty object if not provided.
+		 */
+		defaultValue?: unknown | undefined;
+		/**
+		 * The name of the submit button that triggered the submission.
+		 * It will be excluded from the dirty comparison.
+		 */
+		intentName?: string | undefined;
+		/**
+		 * A function to serialize values in defaultValue before comparing them to the form data.
+		 * If not provided, a default serializer is used that behaves as follows:
+		 *
+		 * - string / File:
+		 *   - Returned as-is
+		 * - boolean:
+		 *   - true → 'on'
+		 *   - false → null
+		 * - number / bigint:
+		 *   - Converted to string using `.toString()`
+		 * - Date:
+		 *   - Converted to UTC datetime string without trailing `Z` (e.g. `2026-01-01T12:00:00.000`)
+		 */
+		serialize?: CustomSerialize | undefined;
+		/**
+		 * A function to exclude specific fields from the comparison.
+		 * Useful for ignoring hidden inputs like CSRF tokens or internal fields added by frameworks
+		 * (e.g. Next.js uses hidden inputs to support server actions).
+		 *
+		 * **Example:**
+		 * ```ts
+		 * isDirty(formData, {
+		 *   skipEntry: (name) => name === 'csrf-token',
+		 * });
+		 * ```
+		 */
+		skipEntry?: ((name: string) => boolean) | undefined;
+	},
+): boolean | undefined {
+	if (!formData) {
+		return;
+	}
+
+	const formValue =
+		formData instanceof FormData || formData instanceof URLSearchParams
+			? parseSubmission(formData, {
+					intentName: options?.intentName,
+					skipEntry: options?.skipEntry,
+				}).payload
+			: formData;
+	const serialize: Serialize = (value, context) => {
+		if (options?.serialize) {
+			return options.serialize(value, {
+				name: context.name,
+				defaultSerialize,
+			});
+		}
+
+		return defaultSerialize(value);
+	};
+
+	return !deepEqual(
+		normalize(formValue, { serialize }),
+		normalize(options?.defaultValue, { serialize }),
+	);
+}
+
+/**
+ * Convert an unknown value into something acceptable for HTML form submission.
+ * Returns `undefined` when the value cannot be represented in form data.
+ *
+ * Input -> Output:
+ * - string -> string
+ * - null -> '' (empty string)
+ * - boolean -> 'on' | '' (checked semantics)
+ * - number | bigint -> value.toString()
+ * - Date -> value.toISOString() without trailing `Z`
+ * - File -> File
+ * - FileList -> File[]
+ * - Array -> string[] or File[] if all items serialize to the same kind; otherwise undefined
+ * - anything else -> undefined
+ */
+export function defaultSerialize(value: unknown): ReturnType<Serialize> {
+	function serializePrimitive(
+		value: unknown,
+	): string | File | null | undefined {
+		if (typeof value === 'string' || value === null) {
+			return value;
+		}
+
+		if (typeof value === 'boolean') {
+			return value ? 'on' : null;
+		}
+
+		if (typeof value === 'number' || typeof value === 'bigint') {
+			return value.toString();
+		}
+
+		if (value instanceof Date) {
+			return value.toISOString().slice(0, -1);
+		}
+
+		if (isGlobalInstance(value, 'File')) {
+			return value;
+		}
+	}
+
+	if (Array.isArray(value)) {
+		const options: string[] = [];
+		const files: File[] = [];
+
+		for (const item of value) {
+			const serialized = serializePrimitive(item);
+
+			if (typeof serialized === 'undefined') {
+				return;
+			}
+
+			// It is unclear what `null` in a file array should mean, so we treat it as a string instead
+			if (typeof serialized === 'string' || serialized === null) {
+				if (files.length > 0) {
+					return;
+				}
+
+				options.push(serialized ?? '');
+			} else {
+				if (options.length > 0) {
+					return;
+				}
+
+				files.push(serialized);
+			}
+		}
+
+		if (options.length === value.length) {
+			return options;
+		}
+
+		if (files.length === value.length) {
+			return files;
+		}
+
+		// If not all items are strings or files, return nothing
+	}
+
+	if (isGlobalInstance(value, 'FileList')) {
+		return Array.from(value);
+	}
+
+	return serializePrimitive(value);
+}
+
+/**
+ * Recursively serializes a value using the provided serialize function.
+ * When `stripEmptyValue` is true, empty values, empty arrays, and empty objects
+ * are removed, and single-string arrays are unwrapped to match single-value fields.
+ *
+ * When serialize returns `undefined` for a value (i.e. it can't be represented
+ * as form data), the raw value is kept and recursed into if it's an object or array.
+ *
+ */
+export function normalize(
+	value: unknown,
+	options: {
+		serialize?: Serialize;
+		stripEmptyValue?: boolean;
+		name?: string;
+	} = {},
+): unknown {
+	const {
+		serialize = defaultSerialize,
+		stripEmptyValue = true,
+		name,
+	} = options;
+
+	let data: unknown = serialize(value, {
+		name,
+	});
+
+	if (typeof data === 'undefined') {
+		data = value;
+	}
+
+	if (stripEmptyValue && (data === null || data === '')) {
+		return undefined;
+	}
+
+	if (isGlobalInstance(data, 'File')) {
+		if (stripEmptyValue && data.name === '' && data.size === 0) {
+			return undefined;
+		}
+
+		return data;
+	}
+
+	if (Array.isArray(data)) {
+		if (stripEmptyValue && data.length === 0) {
+			return undefined;
+		}
+
+		const array = data.map((item, index) =>
+			normalize(item, { ...options, name: appendPath(name, index) }),
+		);
+
+		if (
+			stripEmptyValue &&
+			array.length === 1 &&
+			(typeof array[0] === 'string' || array[0] === undefined)
+		) {
+			return array[0];
+		}
+
+		return array;
+	}
+
+	if (isPlainObject(data)) {
+		const entries = Object.entries(data).reduce<Array<[string, unknown]>>(
+			(list, [key, value]) => {
+				const normalizedValue = normalize(value, {
+					...options,
+					name: appendPath(name, key),
+				});
+
+				if (typeof normalizedValue !== 'undefined') {
+					list.push([key, normalizedValue]);
+				}
+
+				return list;
+			},
+			[],
+		);
+
+		if (stripEmptyValue && entries.length === 0) {
+			return undefined;
+		}
+
+		return Object.fromEntries(entries);
+	}
+
+	return data;
+}
+
+/**
+ * Retrieve a field value from FormData with optional type guards.
+ *
+ * **Example:**
+ *
+ * ```ts
+ * // Basic field access: return `unknown`
+ * const email = getFieldValue(formData, 'email');
+ * // String type: returns `string`
+ * const name = getFieldValue(formData, 'name', { type: 'string' });
+ * // File type: returns `File`
+ * const avatar = getFieldValue(formData, 'avatar', { type: 'file' });
+ * // Object type: returns { city: unknown, ... }
+ * const address = getFieldValue<Address>(formData, 'address', { type: 'object' });
+ * // Array: returns `unknown[]`
+ * const tags = getFieldValue(formData, 'tags', { array: true });
+ * // Array with object type: returns `Array<{ name: unknown, ... }>`
+ * const items = getFieldValue<Item[]>(formData, 'items', { type: 'object', array: true });
+ * // Optional string type: returns `string | undefined`
+ * const bio = getFieldValue(formData, 'bio', { type: 'string', optional: true });
+ * ```
+ */
+export function getFieldValue<
+	FieldShape extends Array<Record<string, unknown>>,
+>(
+	formData: FormData | URLSearchParams,
+	name: FieldName<FieldShape>,
+	options: { type: 'object'; array: true; optional: true },
+): FieldShape extends Array<infer Item extends Record<string, unknown>>
+	? Array<UnknownObject<Item>> | undefined
+	: never;
+export function getFieldValue<
+	FieldShape extends Array<Record<string, unknown>>,
+>(
+	formData: FormData | URLSearchParams,
+	name: FieldName<FieldShape>,
+	options: { type: 'object'; array: true },
+): FieldShape extends Array<infer Item extends Record<string, unknown>>
+	? Array<UnknownObject<Item>>
+	: never;
+export function getFieldValue<
+	FieldShape extends Record<string, unknown> = Record<string, unknown>,
+>(
+	formData: FormData | URLSearchParams,
+	name: FieldName<FieldShape>,
+	options: { type: 'object'; optional: true },
+): UnknownObject<FieldShape> | undefined;
+export function getFieldValue<
+	FieldShape extends Record<string, unknown> = Record<string, unknown>,
+>(
+	formData: FormData | URLSearchParams,
+	name: FieldName<FieldShape>,
+	options: { type: 'object' },
+): UnknownObject<FieldShape>;
+export function getFieldValue<FieldShape>(
+	formData: FormData | URLSearchParams,
+	name: FieldName<FieldShape>,
+	options: { type: 'string'; array: true; optional: true },
+): string[] | undefined;
+export function getFieldValue<FieldShape>(
+	formData: FormData | URLSearchParams,
+	name: FieldName<FieldShape>,
+	options: { type: 'string'; array: true },
+): string[];
+export function getFieldValue<FieldShape>(
+	formData: FormData | URLSearchParams,
+	name: FieldName<FieldShape>,
+	options: { type: 'string'; optional: true },
+): string | undefined;
+export function getFieldValue<FieldShape>(
+	formData: FormData | URLSearchParams,
+	name: FieldName<FieldShape>,
+	options: { type: 'string' },
+): string;
+export function getFieldValue<FieldShape>(
+	formData: FormData | URLSearchParams,
+	name: FieldName<FieldShape>,
+	options: { type: 'file'; array: true; optional: true },
+): File[] | undefined;
+export function getFieldValue<FieldShape>(
+	formData: FormData | URLSearchParams,
+	name: FieldName<FieldShape>,
+	options: { type: 'file'; array: true },
+): File[];
+export function getFieldValue<FieldShape>(
+	formData: FormData | URLSearchParams,
+	name: FieldName<FieldShape>,
+	options: { type: 'file'; optional: true },
+): File | undefined;
+export function getFieldValue<FieldShape>(
+	formData: FormData | URLSearchParams,
+	name: FieldName<FieldShape>,
+	options: { type: 'file' },
+): File;
+export function getFieldValue<FieldShape>(
+	formData: FormData | URLSearchParams,
+	name: FieldName<FieldShape>,
+	options: { array: true; optional: true },
+): Array<unknown> | undefined;
+export function getFieldValue<FieldShape>(
+	formData: FormData | URLSearchParams,
+	name: FieldName<FieldShape>,
+	options: { array: true },
+): Array<unknown>;
+export function getFieldValue<FieldShape>(
+	formData: FormData | URLSearchParams,
+	name: FieldName<FieldShape>,
+	options?: { optional?: boolean },
+): unknown;
+export function getFieldValue<FieldShape>(
+	formData: FormData | URLSearchParams,
+	name: FieldName<FieldShape>,
+	options?: {
+		type?: 'object' | 'string' | 'file';
+		array?: boolean;
+		optional?: boolean;
+	},
+): unknown {
+	const { type, array, optional } = options ?? {};
+
+	let value: unknown;
+
+	// Check if formData has a direct entry
+	if (formData.has(name)) {
+		// Get value based on array option
+		value = array ? formData.getAll(name) : formData.get(name);
+	} else {
+		// Parse formData and use getPathValue
+		const submission = parseSubmission(formData);
+		value = getPathValue(submission.payload, name);
+	}
+
+	// If optional and value is undefined, skip validation and return early
+	if (optional && value === undefined) {
+		return;
+	}
+
+	// Type guards - validate the value matches the expected type
+	if (array && !Array.isArray(value)) {
+		throw new Error(
+			`Expected field "${name}" to be an array, but got ${getTypeName(value)}`,
+		);
+	}
+
+	if (type) {
+		const items = array ? (value as unknown[]) : [value];
+		const predicate = {
+			string: (v: unknown) => typeof v === 'string',
+			file: (v: unknown) => v instanceof File,
+			object: isPlainObject,
+		}[type];
+		const typeName = {
+			string: 'a string',
+			file: 'a File',
+			object: 'an object',
+		}[type];
+
+		for (let i = 0; i < items.length; i++) {
+			if (!predicate(items[i])) {
+				const field = array ? `${name}[${i}]` : name;
+				throw new Error(
+					`Expected field "${field}" to be ${typeName}, but got ${getTypeName(items[i])}`,
+				);
+			}
+		}
+	}
+
+	return value;
+}

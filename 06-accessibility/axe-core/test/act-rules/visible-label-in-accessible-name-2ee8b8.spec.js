@@ -1,0 +1,13 @@
+require('./act-runner.js')({
+  id: '2ee8b8',
+  title: 'Visible label is part of accessible name',
+  axeRules: ['label-content-name-mismatch'],
+  skipTests: [
+    // ACT made abbreviation and hyphenation differences inapplicable, but axe
+    // cannot detect either reliably and reports a violation instead. This
+    // divergence is accepted; see
+    // https://github.com/act-rules/act-rules.github.io/pull/2443
+    '4c8c38022d15c92158ecaaa647fe8ca2c330f485', // Inapplicable Example 5
+    'e9bbdbec137223e2973c6d2896050770c84c26e5' // Inapplicable Example 6
+  ]
+});

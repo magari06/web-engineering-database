@@ -1,0 +1,1172 @@
+# Validation rule catalog (Layer 2) — stable IDs for diagnostics and conformance.
+# spec_version aligns with the human-readable spec (see spec/index.md).
+spec_version: "1.0.0-draft"
+rules:
+  - id: SPEC-001
+    name: alias-target-exists
+    severity: error
+    category: reference-integrity
+    assert: Every alias $ref MUST resolve to an existing token in the dataset.
+    message: "Alias target not found for $ref: {path}"
+    spec_ref: spec/token-format.md#alias-ref
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-002
+    name: alias-type-compatibility
+    severity: error
+    category: type-safety
+    assert: Resolved alias target MUST have a value type compatible with the referencing token’s expected type.
+    message: "Alias {path} resolves to incompatible type"
+    spec_ref: spec/token-format.md#literal-value
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-003
+    name: no-circular-aliases
+    severity: error
+    category: reference-integrity
+    assert: Alias chains MUST NOT contain cycles.
+    message: "Circular alias chain detected involving {path}"
+    spec_ref: spec/token-format.md#alias-ref
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-004
+    name: uuid-global-uniqueness
+    severity: error
+    category: completeness
+    assert: Token uuid values MUST be unique across all token documents in the dataset.
+    message: "Duplicate uuid {uuid}"
+    spec_ref: spec/token-format.md#lifecycle-and-metadata
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-005
+    name: cascade-coverage
+    severity: error
+    category: completeness
+    assert: Mode set declarations MUST satisfy coverage rules (e.g. default ∈ modes; peer mode requirements from coverage metadata).
+    message: "Mode-set coverage violation for {mode_set}"
+    spec_ref: spec/mode-sets.md#coverage-validation
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-006
+    name: specificity-correctness
+    severity: warning
+    category: type-safety
+    assert: When two tokens from the same layer match a context with equal specificity, the tie MUST be broken by document order (earlier in file wins; lexicographically earlier file path wins across files). Ties MUST be reported as warnings.
+    message: "Ambiguous cascade resolution (specificity tie) between {token_a} and {token_b} for context {context}; resolved by document order"
+    spec_ref: spec/cascade.md#semantic-specificity
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-007
+    name: name-roundtrip
+    severity: warning
+    category: naming-consistency
+    assert: Every legacy token name MUST be reproducible from a structured name object via deterministic generation rules, unless listed in naming-exceptions.json.
+    message: "Token '{token}' does not roundtrip through name-object generation rules"
+    spec_ref: spec/token-format.md#name-object
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-008
+    name: cascade-completeness
+    severity: warning
+    category: completeness
+    assert: For every cascade token that has a non-default mode variant, a base/default variant (name object with no mode set fields for that mode set, or explicitly the default mode value) MUST also exist in the dataset. Ensures all consumers can resolve without a fallback gap.
+    message: "Token property '{property}' has mode variant '{mode}' but no base/default variant"
+    spec_ref: spec/cascade.md#coverage
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-009
+    name: name-field-enum-sync
+    severity: warning
+    category: naming-consistency
+    assert: Recognized name object fields (component, state, variant, etc.) SHOULD use values drawn from the corresponding spectrum-design-data registry when those enums are available.
+    message: "Token name field '{field}' value '{value}' is not in the spectrum-design-data registry for '{field}'"
+    spec_ref: spec/token-format.md#name-object
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-010
+    name: replaced-by-target-exists
+    severity: error
+    category: reference-integrity
+    assert: Every UUID in replaced_by MUST resolve to an existing token in the dataset.
+    message: "replaced_by target UUID not found: {uuid}"
+    spec_ref: spec/token-format.md#lifecycle-and-metadata
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-011
+    name: replaced-by-array-requires-comment
+    severity: error
+    category: completeness
+    assert: When replaced_by is an array, deprecated_comment MUST be present to explain which replacement applies in which scope.
+    message: "replaced_by is an array but deprecated_comment is missing on token {token}"
+    spec_ref: spec/token-format.md#lifecycle-and-metadata
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-012
+    name: replaced-by-requires-deprecated
+    severity: error
+    category: completeness
+    assert: If replaced_by is present, deprecated MUST also be present.
+    message: "Token {token} has replaced_by but is not marked deprecated"
+    spec_ref: spec/token-format.md#lifecycle-and-metadata
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-013
+    name: planned-removal-requires-deprecated
+    severity: error
+    category: completeness
+    assert: If plannedRemoval is present, deprecated MUST also be present.
+    message: "Token {token} has plannedRemoval but is not marked deprecated"
+    spec_ref: spec/token-format.md#lifecycle-and-metadata
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-014
+    name: composite-inline-alias-exists
+    severity: error
+    category: reference-integrity
+    assert: Inline alias references ({token-name}) within composite values MUST resolve to an existing token in the dataset.
+    message: "Inline alias target not found within composite value: {path}"
+    spec_ref: spec/token-format.md#inline-alias-references
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-015
+    name: composite-inline-alias-type-compatible
+    severity: error
+    category: type-safety
+    assert: Resolved inline alias target within a composite value MUST have a value type compatible with the sub-value's expected type.
+    message: "Inline alias {path} within composite resolves to incompatible type"
+    spec_ref: spec/token-format.md#inline-alias-references
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-016
+    name: value-type-match
+    severity: error
+    category: type-safety
+    assert: When $valueType is present on a token with a literal value, the value MUST validate against the referenced value-type schema.
+    message: "Token {token} value does not validate against declared $valueType schema {schema}"
+    spec_ref: spec/token-format.md#value-type-declaration-valuetype
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-017
+    name: string-name-tech-debt
+    severity: warning
+    category: tech-debt
+    assert: Token names SHOULD be structured name objects. A plain string name is permitted as a temporary escape hatch but MUST be treated as tech debt and tracked for remediation.
+    message: 'Token "{name}" uses a string name instead of a name object — treat as tech debt and plan remediation'
+    spec_ref: spec/token-format.md#string-name-escape-hatch
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-018
+    name: component-name-exists
+    severity: error
+    category: reference-integrity
+    assert: Token name-object 'component' field value MUST match the 'name' of a declared component in the dataset.
+    message: "Token '{token}' references undeclared component '{component}'"
+    note: "Skipped when no component catalog is loaded (empty components list). Token-only validation runs that omit component declarations will not trigger this rule."
+    spec_ref: spec/component-format.md#name
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-019
+    name: component-variant-valid
+    severity: error
+    category: reference-integrity
+    assert: Token name-object 'variant' field value MUST match a value in the declared 'variant' option `values` list for the referenced component, when that list exists.
+    message: "Token '{token}' has variant '{variant}' which is not declared on component '{component}'"
+    spec_ref: spec/component-format.md#options
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-020
+    name: component-anatomy-valid
+    severity: error
+    category: reference-integrity
+    assert: Token name-object 'anatomy' field value MUST match the 'name' of a declared anatomy part on the referenced component.
+    message: "Token '{token}' references undeclared anatomy part '{anatomy}' on component '{component}'"
+    spec_ref: spec/component-format.md#anatomy-stub
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-021
+    name: component-slot-vocabulary
+    severity: warning
+    category: component-contract
+    assert: Component slot declarations with a 'name' outside the canonical slot vocabulary SHOULD include a 'description' field documenting the custom slot's purpose.
+    message: "Component '{component}' has custom slot '{slot}' with no description — add a description or use a canonical slot name"
+    spec_ref: spec/component-format.md#canonical-slot-vocabulary
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-022
+    name: component-state-valid
+    severity: error
+    category: reference-integrity
+    assert: Token name-object 'state' field value MUST match the 'name' of a declared state on the referenced component, when state declarations are present.
+    message: "Token '{token}' references undeclared state '{state}' on component '{component}'"
+    spec_ref: spec/component-format.md#spec-rules
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-023
+    name: anatomy-custom-part-documented
+    severity: warning
+    category: component-contract
+    assert: Anatomy part declarations with a 'name' outside the canonical anatomy vocabulary SHOULD include a 'description' field.
+    message: "Component '{component}' has custom anatomy part '{part}' with no description"
+    spec_ref: spec/anatomy-format.md#canonical-anatomy-vocabulary
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-024
+    name: anatomy-part-name-unique
+    severity: error
+    category: component-contract
+    assert: Anatomy part names within a single component's anatomy array MUST be unique.
+    message: "Component '{component}' declares duplicate anatomy part name '{part}'"
+    spec_ref: spec/anatomy-format.md#name
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-025
+    name: anatomy-requires-component
+    severity: error
+    category: reference-integrity
+    assert: >
+      A token name object MUST NOT include an 'anatomy' field unless a 'component' or
+      'structure' field is also present, or the 'anatomy' value is a registry term
+      flagged 'standaloneScope: true' in anatomy-terms.json (cross-cutting parts with
+      no single owning component, e.g. 'focus-ring', 'focus-indicator').
+    message: "Token '{token}' has 'anatomy' field without a 'component' or 'structure' field, and '{anatomy}' is not a registry term flagged standaloneScope"
+    spec_ref: spec/anatomy-format.md#cross-reference-with-token-name-objects
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-026
+    name: state-custom-name-documented
+    severity: warning
+    category: component-contract
+    assert: State declarations with a 'name' outside the canonical state vocabulary SHOULD include a 'description' field.
+    message: "Component '{component}' has custom state '{state}' with no description"
+    spec_ref: spec/state-model.md#canonical-state-vocabulary
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-027
+    name: token-binding-token-exists
+    severity: error
+    category: reference-integrity
+    assert: Each tokenBindings[].token value in a component declaration MUST match the name of a declared token in the dataset.
+    message: "Component '{component}' tokenBindings references unknown token '{token}'"
+    spec_ref: spec/component-format.md#token-bindings
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-028
+    name: document-block-agents-equals-content
+    severity: warning
+    category: completeness
+    assert: >
+      A document block's agents field, when present, SHOULD contain phrasing that differs from
+      content. An identical copy provides no agent-specific value and SHOULD be omitted or refined.
+      Applies to tokens, components, and anatomy parts.
+    message: "'{entity}' has a document block whose agents text is identical to content — tailor it for agent consumption or omit the agents field"
+    spec_ref: spec/document-blocks.md
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-029
+    name: document-block-missing-purpose
+    severity: warning
+    category: completeness
+    assert: >
+      An entity that carries a non-empty documentBlocks array SHOULD include at least one block
+      with type 'purpose' to document the entity's intent.
+      Applies to tokens, components, and anatomy parts.
+    message: "'{entity}' has documentBlocks but no purpose block — add a block with type 'purpose'"
+    spec_ref: spec/document-blocks.md
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-030
+    name: accessibility-empty
+    severity: warning
+    category: completeness
+    assert: >
+      A component declaration that carries an accessibility object SHOULD populate at least one
+      of the five known fields (role, intents, focusable, keyboardIntents, wcag). An entirely
+      empty accessibility object provides no semantic value and should be populated or removed.
+    message: "Component '{entity}' has an empty accessibility object — populate at least one field or remove the property"
+    spec_ref: spec/accessibility.md
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-031
+    name: accessibility-wcag-missing
+    severity: warning
+    category: completeness
+    assert: >
+      A component whose accessibility declaration includes a role SHOULD also include a non-empty
+      wcag array listing applicable WCAG 2.x success criteria. WCAG citations improve audit
+      traceability for components with a named semantic role.
+    message: "Component '{entity}' accessibility has a role but no wcag entries — add applicable WCAG 2.x success criteria"
+    spec_ref: spec/accessibility.md
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-032
+    name: product-layer-override-type-compat
+    severity: error
+    category: cascade
+    assert: >
+      A Platform- or Product-layer token that overrides a Foundation token (matched by UUID)
+      MUST NOT change the JSON value type of the `value` field. Overrides may change the value
+      but must preserve its JSON kind (string, number, object, array, boolean).
+    message: "Token '{entity}' override changes value type from '{foundationType}' to '{overrideType}' — overrides MUST NOT change the resolved token's value type"
+    spec_ref: spec/cascade.md
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-033
+    name: registry-id-cross-namespace-allowed
+    severity: error
+    category: registry
+    # Meta-rule: constrains validator behavior, not data shape. No SDK implementation exists;
+    # this entry documents a MUST constraint for external validator implementors. The error
+    # severity correctly signals "MUST" — a validator that incorrectly rejects valid
+    # cross-registry IDs is non-conforming. No conformance fixture is required because the
+    # SDK never emits this diagnostic; the rule is enforced by spec prose alone.
+    assert: >
+      A validator MUST NOT flag a registry ID as invalid solely because that same ID appears in
+      a different registry. Registry IDs are scoped to their registry; cross-registry overlap is
+      intentional when the same word is a valid term in each registry's distinct validation scope.
+    message: "Registry ID '{id}' appears in multiple registries — this is permitted; do not reject on cross-registry overlap alone"
+    spec_ref: spec/registry.md#id-scoping
+    introduced_in: "1.0.0-draft"
+  - id: SPEC-034
+    name: component-category-registry-sync
+    severity: warning
+    category: naming-consistency
+    assert: >
+      A component's meta.category SHOULD reference an id from the categories registry in
+      @adobe/spectrum-design-data registry/categories.json. Unknown values are reported as
+      warnings; the registry is the authoritative vocabulary.
+    message: "Component '{entity}' meta.category value '{value}' is not in the spectrum-design-data registry/categories vocabulary"
+    spec_ref: spec/registry.md#categories
+    introduced_in: "1.0.0-draft"
+  - id: SPEC-035
+    name: anatomy-part-name-registry-sync
+    severity: warning
+    category: naming-consistency
+    assert: >
+      A component anatomy part's name SHOULD reference an id from the anatomy-terms registry in
+      @adobe/spectrum-design-data registry/anatomy-terms.json. Unknown values are reported as
+      warnings; custom names remain permitted but the registry is the authoritative vocabulary.
+    message: "Component '{entity}' anatomy part name '{value}' is not in the spectrum-design-data registry/anatomy-terms vocabulary"
+    spec_ref: spec/anatomy-format.md#canonical-anatomy-vocabulary
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-036
+    name: component-deprecation-cascade
+    severity: warning
+    category: reference-integrity
+    assert: >
+      Tokens SHOULD NOT reference a deprecated component via `name.component` unless the token
+      is itself deprecated. Non-deprecated tokens referencing a deprecated component are surfaced
+      as warnings to prompt authors to update the reference or mark the token deprecated.
+    message: "Token '{token}' references deprecated component '{component}' (deprecated since {version}); update the reference or mark the token deprecated"
+    spec_ref: spec/component-format.md#lifecycle
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-037
+    name: sub-entity-deprecation-cascade
+    severity: warning
+    category: reference-integrity
+    assert: >
+      Tokens SHOULD NOT reference a deprecated anatomy part, deprecated component state, or
+      deprecated option value via their `name` object unless the token is itself deprecated.
+      Non-deprecated tokens referencing deprecated sub-entities are surfaced as warnings to
+      prompt authors to update the reference or mark the token deprecated.
+      Deprecation is declared via `lifecycle.deprecated` on anatomy parts, states, and individual
+      option values within the `values` array on option descriptors.
+    message: "Token '{token}' references deprecated {kind} '{value}' on component '{component}' (deprecated since {version}); update the reference or mark the token deprecated"
+    spec_ref: spec/component-format.md#lifecycle
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-038
+    name: option-enum-obsolete
+    severity: warning
+    category: component-contract
+    assert: >
+      Option descriptors SHOULD NOT use the JSON Schema `enum` keyword. The `enum` field is
+      silently accepted at Layer 1 (optionDescriptor uses additionalProperties: true) but has
+      no effect on SDK rules or lifecycle cascade. Use `values` instead so per-value lifecycle
+      metadata can be attached to individual values.
+    message: "Component '{component}' option '{option}' uses the obsolete `enum` keyword; replace with a `values` array so per-value lifecycle metadata can be expressed"
+    spec_ref: spec/component-format.md#option-descriptor
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-039
+    name: manifest-query-parseable
+    severity: error
+    layer: 2
+    category: manifest
+    rfc: "#715"
+    assert: >
+      Each entry in 'manifest.include' and 'manifest.exclude' MUST parse as a valid query
+      expression per spec/query.md and MUST use only the supported query keys.
+      Entries that fail to parse, or that reference unsupported keys, are Layer 2 errors.
+      This rule lifts the deferred 'treat as opaque' clause from earlier 1.0.0-draft revisions.
+    message: "Manifest {array}[{idx}] failed to parse as a query: {error}"
+    spec_ref: spec/manifest.md#include--exclude
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-040
+    name: component-option-field-valid
+    severity: warning
+    layer: 2
+    category: component
+    rfc: "#806"
+    assert: >
+      For every token whose name object contains a key that is not a reserved name-object field
+      and that matches a declared component.options.<key> with a values[] list, the token's value
+      MUST appear in that values[] list. Reserved fields (component, variant, state, anatomy,
+      property, colorScheme, scale, contrast, uuid, object, category) are excluded; variant is
+      owned by SPEC-019. This rule generalises SPEC-019 to all remaining option-enum fields
+      (style, size, staticColor, etc.) at advisory severity.
+    message: "Token '{token}' has {field} '{value}' which is not declared on component '{component}'"
+    spec_ref: spec/component-format.md#options
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-041
+    name: mode-set-restriction-coverage
+    severity: error
+    layer: 2
+    category: completeness
+    rfc: "#806"
+    assert: >
+      When a manifest declares modeSetRestrictions, every token group (tokens sharing the same
+      non-mode-set name object fields) MUST have at least one candidate that survives ALL
+      restrictions simultaneously — i.e. at least one token whose name object either omits
+      each restricted mode set field (wildcard) or sets it to an allowed mode value for every
+      restriction. Restrictions are applied as a conjunction (matching cascade step 0), so a
+      group that satisfies each restriction individually but has no single token satisfying
+      all restrictions at once is also a coverage gap.
+      Sub-checks: (a) a modeSetRestrictions key that names an unknown mode set MUST emit a
+      Warning; (b) an allowed list that excludes the mode set's declared default MUST emit
+      an Error, since the resolver would return None for the default context on that platform.
+    message: "Token group '{base_name}' has no resolvable candidate under manifest mode-set restrictions ({restrictions})"
+    spec_ref: spec/mode-sets.md#platform-restrictions
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-042
+    name: field-scope-violation
+    severity: warning
+    layer: 2
+    category: taxonomy
+    rfc: "#806"
+    assert: >
+      When a token's name object contains a domain-scoped field (e.g. `colorFamily`,
+      `weight`, `motionRole`), the token's effective domain schema MUST be compatible
+      with that field's scope. For alias tokens (`alias.json`), the rule follows the
+      `alias_target` chain to the terminal non-alias schema before checking domain
+      compatibility — a color alias may carry `colorFamily` when its target is a
+      color-domain token. Using a color-scoped field on a typography token, or a
+      typography-scoped field on a color token, is a taxonomy violation. The set of
+      domain-scoped fields and their valid schema URL suffixes is declared in the field
+      catalog under `packages/design-data/fields/` via the `scope` property.
+      Tokens without a `$schema` are skipped (domain cannot be determined).
+    message: "name.{field} is a {scope}-scoped field but token schema '{effective_schema}' is not a {scope} token type"
+    spec_ref: spec/taxonomy.md#token-type-taxonomies
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-043
+    name: domain-required-fields
+    severity: warning
+    layer: 2
+    category: taxonomy
+    rfc: "#806"
+    assert: >
+      Tokens in a known domain SHOULD include at least one domain-identifying field in
+      their name object so tooling can group, sort, and validate them correctly.
+      Color tokens (schema: color.json, color-set.json) SHOULD have `colorFamily` or
+      `scaleIndex`. Typography tokens (schema: font-*.json, typography.json) SHOULD have
+      `family`, `weight`, or `style`. Motion tokens (schema: duration.json, motion.json)
+      SHOULD have `motionRole` or `easing`. String-named tokens and tokens without `$schema`
+      are skipped. Advisory severity: the existing corpus has not yet migrated to structured
+      name objects; this rule tracks progress rather than blocking.
+    message: "{domain} token has a name object but no domain-identifying field — add at least one of: {required_fields}"
+    spec_ref: spec/taxonomy.md#token-type-taxonomies
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-044
+    name: dataset-structure
+    severity: error
+    layer: 2
+    category: structure
+    assert: >
+      A conformant dataset MUST contain a `tokens/` directory holding at least one
+      `*.tokens.json` file. This structural pre-check fires before token- and
+      component-level rules so that downstream rules can assume the dataset structure
+      is present, and an incomplete dataset produces a clear "structure is incomplete"
+      diagnostic rather than a cascade of confusing per-file errors. A registered
+      optional directory (`components/`, `fields/`, `mode-sets/`, `registry/`) that is
+      present SHOULD contain at least one conformant `*.json` file; an empty registered
+      directory is reported as a warning. Because this rule inspects the on-disk
+      directory layout it runs as a filesystem pre-pass, not against the in-memory graph.
+    message: "Dataset structure incomplete: {detail}"
+    spec_ref: spec/dataset-layout.md#structural-validation
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-045
+    name: guideline-missing-purpose
+    severity: warning
+    layer: 2
+    category: completeness
+    assert: >
+      A guideline document SHOULD include at least one `documentBlocks` block with
+      type `purpose`. A purpose block explains the design intent of the topic and
+      is the primary entry point for agents and designers querying the guidance
+      corpus. This mirrors SPEC-029 (document-block-missing-purpose) but is scoped
+      specifically to the guideline entity.
+    message: "Guideline '{name}' has documentBlocks but no purpose block — add a block with type 'purpose'"
+    spec_ref: spec/guideline-format.md#spec-rules
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-046
+    name: guideline-related-resolves
+    severity: warning
+    layer: 2
+    category: completeness
+    assert: >
+      Every entry in a guideline document's `related` array SHOULD resolve to a known
+      entity: when `kind` is `"component"`, the `ref` MUST match a component `name` in
+      the dataset; when `kind` is `"guideline"`, the `ref` MUST match a guideline `name`
+      in the dataset; when `kind` is absent, the `ref` SHOULD match either a component
+      or a guideline `name`. Dangling references are advisory (warning) to allow
+      incremental migration where some targets may not yet be present.
+    message: "Guideline '{name}' references '{ref}' which is not a known component or guideline"
+    spec_ref: spec/guideline-format.md#related-references
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-047
+    name: space-between-endpoint-valid
+    severity: error
+    layer: 2
+    category: reference-integrity
+    assert: >
+      A token name-object with `property` "space-between" MUST carry both `from` and
+      `to` fields, and `from`/`to` MUST NOT appear unless `property` is "space-between".
+      Each of `from`/`to` MUST be one of: an edge position (`positions.json`), a generic
+      anatomy term (`anatomy-terms.json`), or — when `component` is present and declares
+      an `anatomy` array — the `name` of a declared anatomy part on that component.
+      Mirrors SPEC-020's component→anatomy resolution, unioned with the position and
+      generic-anatomy vocabularies.
+    message: "Token '{token}' has space-between endpoint '{endpoint}' that is not a known position, anatomy term, or declared anatomy part on component '{component}'"
+    spec_ref: spec/token-format.md#space-between-endpoints
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-048
+    name: anatomy-contains-resolves
+    severity: warning
+    layer: 2
+    category: completeness
+    assert: >
+      Each string in an anatomy part's `contains` array SHOULD match the `name` of
+      another anatomy part declared on the same component. Unresolved references are
+      advisory rather than an error: `contains` may legitimately point at sub-component
+      anatomy in layered designs (anatomy-format.md#contains), so this rule only warns
+      when a `contains` entry cannot be resolved against the same component's declared
+      parts.
+    message: "Anatomy part '{part}' on component '{component}' contains '{child}', which is not a declared anatomy part on this component"
+    spec_ref: spec/anatomy-format.md#contains
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-049
+    name: anatomy-in-registry
+    severity: error
+    layer: 2
+    category: reference-integrity
+    assert: >
+      A token name-object 'anatomy' field with no 'component' (SPEC-020 validates that
+      case) MUST reference a known id in the anatomy-terms.json registry. Backstops the
+      two cases SPEC-025 allows anatomy without a component: 'structure'-scoped anatomy
+      and registry terms flagged 'standaloneScope: true'.
+    message: "Token '{token}' references anatomy part '{anatomy}' which is not in the spectrum-design-data registry/anatomy-terms vocabulary"
+    spec_ref: spec/anatomy-format.md#cross-reference-with-token-name-objects
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-050
+    name: property-decomposition-complete
+    severity: warning
+    layer: 2
+    category: naming-consistency
+    assert: >
+      A token name-object's `property` value SHOULD be atomic. It MUST NOT fuse a
+      segment that belongs to another structured field (anatomy, object, position,
+      size, state, colorRole, emphasis) -- detected independent of whether the token
+      roundtrips through canonical name generation (SPEC-007) or is listed in
+      naming-exceptions.json. Roundtripping cleanly does not mean a property is
+      decomposed (spectrum-design-data-284).
+    message: "Token '{token}' fuses '{field}' concept '{value}' into name.property; decompose into the structured field"
+    spec_ref: spec/token-format.md#name-object
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-051
+    name: ctr-component-exists
+    severity: error
+    layer: 2
+    category: reference-integrity
+    assert: >
+      A Component/Token Relationship (CTR)'s `scope.component` value MUST match the
+      `name` of a declared component in the dataset. Mirrors SPEC-018
+      (component-name-exists) for the CTR scope object.
+    message: "Relationship '{relationship}' references undeclared component '{component}'"
+    spec_ref: spec/relationship-format.md#scope-fields
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-052
+    name: ctr-part-valid
+    severity: error
+    layer: 2
+    category: reference-integrity
+    assert: >
+      A CTR's `scope.part` value, when present, MUST match the `name` of a declared
+      anatomy part on the referenced component. Mirrors SPEC-020
+      (component-anatomy-valid) for the CTR scope object.
+    message: "Relationship '{relationship}' references undeclared anatomy part '{part}' on component '{component}'"
+    spec_ref: spec/relationship-format.md#scope-fields
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-053
+    name: ctr-option-valid
+    severity: error
+    layer: 2
+    category: reference-integrity
+    assert: >
+      A CTR's `scope.options.<key>` value MUST match a value in the declared
+      `options.<key>.values` list for the referenced component, when that list exists.
+      Combines the intent of SPEC-019 (component-variant-valid, error) and SPEC-040
+      (component-option-field-valid, warning) into a single error-severity rule for
+      CTRs, since a CTR's options are the whole of its scope rather than one field
+      among many name-object keys.
+    message: "Relationship '{relationship}' has {key} '{value}' which is not declared on component '{component}'"
+    spec_ref: spec/relationship-format.md#scope-fields
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-054
+    name: ctr-state-valid
+    severity: error
+    layer: 2
+    category: reference-integrity
+    assert: >
+      Each element of a CTR's `scope.options.state` array MUST match the `name` of a
+      declared state on the referenced component, when state declarations are present.
+      Mirrors SPEC-022 (component-state-valid) for the CTR scope object.
+    message: "Relationship '{relationship}' references undeclared state '{state}' on component '{component}'"
+    spec_ref: spec/relationship-format.md#scope-fields
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-055
+    name: ctr-ref-resolves
+    severity: error
+    layer: 2
+    category: reference-integrity
+    assert: >
+      A CTR's `$ref` value MUST resolve to a declared token or relationship `uuid` in
+      the dataset. Mirrors SPEC-001 (alias-target-exists) and SPEC-027
+      (token-binding-token-exists) for the CTR alias direction.
+    message: "Relationship alias target not found for $ref: {target}"
+    spec_ref: spec/relationship-format.md#value-owning-vs-relationship-only
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-056
+    name: ctr-uuid-unique
+    severity: error
+    layer: 2
+    category: reference-integrity
+    assert: >
+      CTR `uuid` values MUST be unique across all relationship entries within the same
+      cascade layer. Mirrors SPEC-004 (uuid-global-uniqueness) for relationships.
+    message: "Duplicate relationship uuid {uuid}"
+    spec_ref: spec/relationship-format.md#identity
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-057
+    name: ctr-legacykey-present-if-legacy
+    severity: warning
+    layer: 2
+    category: naming-consistency
+    note: >
+      Advisory placeholder. Detecting "this CTR should have a legacy counterpart" is a
+      generator-side determination deferred to the legacy-migration phase; this rule
+      documents intent rather than enforcing it structurally.
+    assert: >
+      A CTR that round-trips through the legacy generator (packages/tokens/src) SHOULD
+      carry `legacyKey`. Not structurally enforced in this foundation.
+    message: "Relationship '{relationship}' may need a legacyKey to round-trip through the legacy generator"
+    spec_ref: spec/relationship-format.md#legacy-fields-interim
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-058
+    name: ctr-ref-not-deprecated
+    severity: warning
+    layer: 2
+    category: naming-consistency
+    note: >
+      Warning, not error: some deprecated targets have no `replacedBy` (or an ambiguous
+      array-form one) and can't be auto-corrected without manual triage, so this can't be
+      a hard gate yet.
+    assert: >
+      A relationship-only CTR's `$ref` (no `uuid`/`legacyKey`) SHOULD NOT resolve to a
+      token whose `lifecycle.deprecatedIn` is set. A value-owning CTR (`uuid`/`legacyKey`
+      present) is exempt — it legitimately *is* the deprecated token record.
+    message: "Relationship $ref {ref} resolves to a token deprecated in {deprecatedIn}"
+    spec_ref: spec/relationship-format.md#legacy-fields-interim
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-059
+    name: alias-mode-context-compatibility
+    severity: warning
+    layer: 2
+    category: reference-integrity
+    note: >
+      Mode analogue of SPEC-002. A `$ref` target that is a `conceptId` (see
+      token-format.md#concept-identity-conceptid) is context-resolved elsewhere and exempt
+      here; only a direct per-value target is checked.
+    assert: >
+      An alias whose name object sets a mode-set field (e.g. `colorScheme: dark`) SHOULD NOT
+      resolve, via its `$ref` chain, to a per-value token that sets the same field to a
+      different value. Tokens whose name object omits the field (mode-agnostic) are exempt.
+    message: "Alias {token} sets {field}={ownValue} but its $ref chain resolves to a token with {field}={leafValue}"
+    spec_ref: spec/cascade.md#alias-resolution
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-060
+    name: visual-anatomy-valid
+    severity: error
+    layer: 2
+    category: reference-integrity
+    note: >
+      Cross-file sibling of SPEC-020 for visual recipes (`visuals/*.json`). A JSON Schema
+      cannot read the component file, so this is not a Layer 1 check. Skipped when no
+      component catalog is loaded.
+    assert: >
+      A visual recipe's `component` MUST name a declared component. Every key of `parts` MUST
+      be a declared anatomy part. `root` MUST be a recipe part and a top-level anatomy part
+      (listed in no other part's `contains`). Each part's `children` MUST be recipe parts and
+      appear in that anatomy part's `contains`. `around` MUST name a declared anatomy part;
+      `pressTarget` MUST name a declared anatomy part that is also a recipe part.
+    message: "Recipe part '{part}' is not a declared anatomy part of '{component}'"
+    spec_ref: spec/component-visuals.md#validation
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-061
+    name: visual-conditions-valid
+    severity: error
+    layer: 2
+    category: reference-integrity
+    assert: >
+      Every `when.options` key (and `visibleWhen.options` key) in a visual recipe MUST be an
+      option of the component, with a value in that option's `values` (a boolean option
+      requires a boolean). Every `when.states` / `visibleWhen.states` entry MUST be the `name`
+      of a state declared by the component. Every `{name}` placeholder in a `token` or
+      `relationship` selector MUST be `size`, `sizeIndex` or an option of the component that
+      declares `values`.
+    message: "Option '{option}' of '{component}' has no value {value}"
+    spec_ref: spec/component-visuals.md#validation
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-062
+    name: visual-selectors-resolve
+    severity: error
+    layer: 2
+    category: reference-integrity
+    note: >
+      `{sizeIndex}` expands over the `sizeScale` values, `{size}` over its keys and `{option}`
+      over the option's declared values before resolving. Relationship `context` is compared trimmed. Token selectors match name-object
+      fields the way the visual runtime does, including the property + `scaleIndex` fallback.
+    assert: >
+      Every `{relationship: {property, context}}` selector in a visual recipe MUST resolve to
+      a relationship record whose `scope.component` is the recipe's component and whose
+      `scope.property` and `context` match. Every `{token: {...}}` selector MUST match at
+      least one token.
+    message: "No relationship for '{component}' with property '{property}' and context '{context}'"
+    spec_ref: spec/component-visuals.md#validation
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-063
+    name: visual-size-scale-valid
+    severity: error
+    layer: 2
+    category: reference-integrity
+    assert: >
+      The keys of a visual recipe's `sizeScale` MUST equal the values of the component's
+      `size` option. A component without a `size` option MAY declare a one-entry `sizeScale`,
+      the single size renderers draw (for example the fixed-size iOS switch).
+    message: "sizeScale key '{size}' is not a 'size' value of '{component}'"
+    spec_ref: spec/component-visuals.md#validation
+    introduced_in: "1.0.0-draft"
+  - id: SPEC-064
+    name: constraint-options-declared
+    severity: error
+    layer: 2
+    category: component
+    assert: >
+      Every option name used in a component constraint's `when` or `require` MUST be declared in
+      the component's `options`. Every value used there MUST appear in that option's `values`
+      list. Value checks are silent when the option declares no `values` list.
+    message: "Constraint option '{option}' is not declared on component '{component}'"
+    spec_ref: spec/option-constraints.md#rules
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-065
+    name: recipe-targets-excluded-combination
+    severity: warning
+    layer: 2
+    category: component
+    note: >
+      Only `error` constraints count. Unpinned options range over their declared values (booleans
+      over true and false); an option with no known domain is never proven excluded. A rule that
+      also matches a valid combination is not reported.
+    assert: >
+      A visual recipe rule (`when.options`) or relationship `scope.options` SHOULD NOT match only
+      combinations excluded by an `error` constraint on the component.
+    message: "Recipe rule for '{component}' matches only combinations excluded by an error constraint"
+    spec_ref: spec/option-constraints.md#rules
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-066
+    name: visual-covers-component
+    severity: warning
+    layer: 2
+    category: component
+    note: >
+      A name counts as used when a `when` or `visibleWhen` condition names it, when a token the
+      recipe binds carries the state, or when it is implied: `size` by `sizeScale`, `label` by a
+      text part, and `isDisabled` or `isSelected` by the `disabled` or `selected` states (and the
+      reverse). New recipes MUST be free of this warning; existing recipes are held at a baseline.
+    assert: >
+      Every option and state a component declares SHOULD either affect its visual recipe or be
+      listed in the recipe's `notVisual` array. A `notVisual` name MUST be declared by the
+      component and SHOULD NOT also be used by the recipe.
+    message: "Option '{option}' of '{component}' does not affect the recipe; use it in a condition or list it in notVisual"
+    spec_ref: spec/component-visuals.md#validation
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-067
+    name: visual-prefers-relationship
+    severity: warning
+    layer: 2
+    category: reference-integrity
+    note: >
+      Relationships carry the component scope and the design-token group label, so a recipe
+      binds through them by default. Use a `token` selector only when no relationship covers the
+      value.
+    assert: >
+      A `token` selector in a visual recipe SHOULD NOT bind a token that one of the component's
+      relationships already binds.
+    message: "Token selector {selector} is also bound by relationship {relationship}; bind it through the relationship"
+    spec_ref: spec/component-visuals.md#validation
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-068
+    name: visual-literal-discouraged
+    severity: warning
+    layer: 2
+    category: tech-debt
+    note: >
+      Layout keywords (`direction`, `align`, `justify`), `transparent` and `none` colors, zero
+      widths and ratio radii (`relativeTo`) are fine as literals.
+    assert: >
+      A literal (`{"value": ...}`) in a visual recipe SHOULD NOT supply a color or a non-zero
+      size; a token or relationship describes it, or one should be added.
+    message: "Literal {value} for '{prop}' on part '{part}'; bind a token or relationship instead"
+    spec_ref: spec/component-visuals.md#validation
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-069
+    name: visual-token-not-deprecated
+    severity: warning
+    layer: 2
+    category: reference-integrity
+    note: >
+      Extends SPEC-058, which checks relationship `$ref` values, to the bindings a recipe draws
+      with.
+    assert: >
+      A `token` or `relationship` selector in a visual recipe SHOULD NOT resolve only to
+      deprecated tokens (those with `lifecycle.deprecatedIn`).
+    message: "{selector} resolves only to deprecated tokens (for example '{token}', deprecated in {version})"
+    spec_ref: spec/component-visuals.md#validation
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-070
+    name: visual-ring-names-agree
+    severity: warning
+    layer: 2
+    category: naming-consistency
+    note: >
+      A shared name lets tools, relationships and docs treat the focus ring alike across
+      components. The rule reports the disagreement, not which name wins.
+    assert: >
+      Visual recipes SHOULD give the focus ring part (`kind: "ring"`) the same name.
+    message: "Focus ring part is named '{name}' here but '{other}' in other recipes; recipes should name it alike"
+    spec_ref: spec/component-visuals.md#validation
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-071
+    name: visual-relationship-contexts-used
+    severity: info
+    layer: 2
+    category: component
+    note: >
+      Unused contexts are not errors: relationships describe the component beyond its recipe.
+      The count shows how much of the component's token data a recipe still has to cover.
+    assert: >
+      A visual recipe reports how many of its component's relationship contexts the recipe
+      never binds.
+    message: "{n} of {total} relationship contexts of '{component}' have no binding in this recipe, for example {sample}"
+    spec_ref: spec/component-visuals.md#validation
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-072
+    name: relationship-duplicate-ref-scale-counterpart
+    severity: warning
+    layer: 2
+    category: relationship
+    note: >
+      Typically a desktop and a mobile record where the second was copied without repointing it,
+      so the other scale's token is never reachable through the relationship. A repeated record
+      on a token with no scale counterpart is not reported.
+    assert: >
+      Two relationship records with the same scope, context and `$ref` SHOULD NOT both point at
+      a token that has a scale counterpart (the same name with another `scale` value).
+    message: "Relationship {scope} references {ref} twice, but the token has a {scale} counterpart ({counterpart}); point one record at it"
+    spec_ref: spec/relationship-format.md
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-073
+    name: component-anatomy-reviewed
+    severity: info
+    layer: 2
+    category: component
+    note: >
+      One diagnostic for the whole dataset, so the gap stays visible without a line per
+      component. Never an error: anatomy is authored as recipes are built. A component with
+      anatomy and no `anatomyReview` counts as draft.
+    assert: >
+      A component that has relationship records SHOULD declare anatomy, and a component's
+      anatomy SHOULD have `anatomyReview.status` of `reviewed`.
+    message: "Components without reviewed anatomy: {n} with relationships but no anatomy ({names}); {m} with draft anatomy ({names})"
+    spec_ref: spec/anatomy-format.md#review-checklist
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-074
+    name: anatomy-present-in-declared
+    severity: error
+    layer: 2
+    category: reference-integrity
+    note: >
+      The anatomy version of SPEC-054. State names are compared after normalization, so
+      `focus`, `key-focus` and `keyboard-focus` are one state. A part that lists `presentIn`
+      on a component that declares no states is also reported.
+    assert: >
+      Every entry of an anatomy part's `presentIn` MUST match a state declared on the same
+      component.
+    message: "Anatomy part '{part}' on component '{component}' is present in state '{state}', but it is not a declared state"
+    spec_ref: spec/anatomy-format.md#presentin
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-075
+    name: visual-present-in-matches-anatomy
+    severity: error
+    layer: 2
+    category: component
+    note: >
+      Keeps a recipe's `visibleWhen.states` and the anatomy's `presentIn` from drifting. States
+      are compared after normalization. `visibleWhen.states` means every listed state, and
+      `presentIn` means any listed state, so a difference is an error only when neither side
+      lists more than one state; otherwise it is reported at info level.
+    assert: >
+      For a recipe part that is also an anatomy part, the recipe's `visibleWhen.states` MUST
+      equal the anatomy part's `presentIn`.
+    message: "Recipe part '{part}' of '{component}' is visible in {recipeStates}, but its anatomy presentIn lists {presentIn}"
+    spec_ref: spec/anatomy-format.md#presentin
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-076
+    name: visual-bindings-resolve-on-platform
+    severity: warning
+    layer: 2
+    category: component
+    note: >
+      Runs only when a platform manifest is in scope (for example `design-data validate
+      --platform ios --visuals-path ...`). Renders each recipe on the foundation and with the
+      manifest's cascade applied, over every size, light and dark, desktop and mobile, each
+      interaction state and each option value, and reports the unresolved bindings that appear
+      only under the platform. A gap the foundation also has is not reported.
+    assert: >
+      Every token or relationship binding a visual recipe resolves on the foundation SHOULD also
+      resolve once the platform manifest's include, exclude, overrides and extensions are applied.
+    message: "Recipe for '{component}' binds something that resolves on the foundation but not under platform '{platform}': {binding}"
+    spec_ref: spec/manifest.md
+    introduced_in: "1.0.0-draft"
+
+  # SPEC-077 (artifact-single-owner) and SPEC-078 (promoted-mode-fallback) are reserved by
+  # spec/artifact-moves.md and are not in this catalog until they are implemented.
+
+  - id: SPEC-079
+    name: platform-recipe-resolves
+    severity: warning
+    layer: 2
+    category: component
+    note: >
+      Runs only when a platform manifest with `extensions/visuals/` is in scope. A warning for
+      now; a follow-up promotes it to an error once this release is published (needs a changeset).
+      Renders each platform-owned recipe over the request grid with no foundation comparison.
+      The request grid is `light`/`dark` by `desktop`/`mobile`, as in SPEC-076. The CI guard
+      `.github/scripts/validate-platform-recipes.mjs` fails on it even while it is a warning.
+    assert: >
+      A platform-owned visual recipe MUST render over the request grid without a scene
+      diagnostic once the platform manifest is applied.
+    message: "Platform recipe for '{component}' does not render under platform '{platform}': {diagnostic}"
+    spec_ref: spec/component-visuals.md#platform-owned-recipes
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-080
+    name: platform-recipe-replaces-foundation
+    severity: info
+    layer: 2
+    category: component
+    note: >
+      Runs only when a platform manifest with `extensions/visuals/` is in scope. Shows a reviewer
+      which foundation recipe a platform recipe replaced, so a copy that may drift is visible.
+    assert: >
+      A platform recipe that has the same component name as a foundation recipe replaces it
+      for that platform; validation reports the pair.
+    message: "Recipe for '{component}' in platform '{platform}' replaces the foundation recipe"
+    spec_ref: spec/component-visuals.md#platform-owned-recipes
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-081
+    name: component-alias-valid
+    severity: error
+    layer: 2
+    category: reference-integrity
+    note: >
+      Runs only when a platform manifest is in scope. Reads the manifest's merged
+      `extensions.components` names and the foundation component catalog.
+    assert: >
+      Each `componentAliases` key MUST be a foundation component, its target MUST be a component
+      the platform declares in `extensions/components/`, aliases MUST NOT chain or form a cycle,
+      and a key MUST NOT also be replaced by `extensions/components/<key>.json`.
+    message: "Invalid component alias '{alias}' in platform '{platform}': {reason}"
+    spec_ref: spec/manifest.md#componentaliases
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-082
+    name: platform-manifest-applies
+    severity: error
+    layer: 2
+    category: reference-integrity
+    note: >
+      Runs only when a platform manifest is in scope. SPEC-076, SPEC-079 and the platform recipe
+      checks apply the manifest themselves and report nothing when it fails, so this rule is what
+      makes a manifest that cannot apply (for example one that extends a mode set that was not
+      loaded, as when `validate --platform` runs without `--mode-sets-path`) fail instead of look
+      like a pass. The CI guard `.github/scripts/validate-platform-recipes.mjs` fails on it.
+    assert: >
+      A platform manifest MUST apply to the foundation graph.
+    message: "Platform '{platform}' failed to apply, so the platform rules (SPEC-076, SPEC-079 and the platform recipe checks) did not run: {error}"
+    spec_ref: spec/manifest.md#validation
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-083
+    name: visual-props-read-by-renderer
+    severity: warning
+    layer: 2
+    category: component
+    note: >
+      The recipe schema accepts props the renderer does not read (`direction`,
+      `align`, `rotation`, and others on a part kind that has no use for them). The renderer
+      ignores them without a diagnostic. The list of read props is the renderer's own table,
+      not a copy kept in the rule. A recipe binding an ignored prop looks complete and draws
+      differently from what it says.
+    assert: >
+      Every prop in a recipe part's `props` MUST be one the renderer reads for that part: the
+      root part, a part of its `kind`, or a part with a `placement`.
+    message: "Part '{part}' ({role}) of '{component}' binds '{prop}', which the renderer does not read for that part"
+    spec_ref: spec/component-visuals.md#validation
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-084
+    name: ctr-uuid-required
+    severity: error
+    layer: 2
+    category: reference-integrity
+    note: >
+      Changelogs, platform overrides and `$ref` all need a stable identity for a
+      relationship. The schema requires `uuid` in `relationships/*.json`; this rule also
+      covers records the schema does not see (a platform manifest's inline relationship
+      adds). Uniqueness is SPEC-056.
+    assert: >
+      Every relationship record MUST have a `uuid`.
+    message: "Relationship #{index} has no uuid (component '{component}', property '{property}')"
+    spec_ref: spec/relationship-format.md#identity
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-085
+    name: visual-icon-exists
+    severity: error
+    layer: 2
+    category: component
+    note: >
+      Runs only when the `icons/` catalog is loaded (`validate --icons-path`, the probed
+      `packages/design-data/icons`, or `validate-dataset`). The recipe schema requires the
+      reference on every `icon` part; this rule checks it against the catalog.
+    assert: >
+      The `icon` an icon part references (`set` and `name`) MUST exist in the `icons/` catalog.
+    message: "Part '{part}' of '{component}' references icon {set}:{name}, but {reason}"
+    spec_ref: spec/component-visuals.md#icons
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-086
+    name: visual-icon-scale
+    severity: warning
+    layer: 2
+    category: component
+    note: >
+      UI icons have one drawing per scale index. The renderer picks the scale from the part's
+      size binding and falls back to the nearest drawing, which is usually a different design
+      (stroke weight and proportions change between sizes). Checked over the request grid,
+      like SPEC-079. Workflow icons have one drawing and are not checked. Runs only when the
+      `icons/` catalog is loaded.
+    assert: >
+      Every `ui` icon a recipe draws SHOULD have a drawing at the scale its size binding gives:
+      the bound size token's `scaleIndex` or `size` key, else the recipe's `sizeScale` entry
+      for the request's size.
+    message: "Part '{part}' of '{component}' draws ui:{name} at scale {scale} ({source}), which has no drawing; the nearest of {available} is drawn instead"
+    spec_ref: spec/component-visuals.md#icons
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-087
+    name: visual-derived-context-matches-token
+    severity: warning
+    layer: 2
+    category: component
+    note: >
+      A recipe's `derived` entry declares a relationship context whose value follows from the
+      solved layout (`(height - label.lineHeight) / 2`) instead of being bound. The context's
+      token is still the documented value, so it must agree with the formula. The check binds
+      the context to the root's padding in a scratch copy of the recipe, solves each size at
+      each scale (`desktop`, `mobile`) and compares. A context whose relationship resolves no
+      token is reported once per entry. A token with a desktop value only is not missing: it
+      resolves for mobile too, so it shows as a mobile mismatch. A disagreement is one warning per
+      scale, so a desktop one is told apart from mobile. Mobile values that the tokens do not
+      carry yet show up here until the token data is fixed.
+    assert: >
+      For every size and scale, the token a `derived` context's relationship gives SHOULD equal
+      the value of its formula over the solved scene.
+    message: "Derived context '{context}' of '{component}' ({from}): the token value differs from the formula at {scale} for {sizes}"
+    spec_ref: spec/component-visuals.md#derived-contexts
+    introduced_in: "1.0.0-draft"
+
+  - id: SPEC-088
+    name: relationship-duplicate-record
+    severity: warning
+    layer: 2
+    category: relationship
+    note: >
+      An exact duplicate adds nothing to resolution, and a changelog that pairs records by
+      identity cannot tell the copies apart. Records with different `setUuid` are not duplicates.
+      SPEC-072 may also report a pair whose token has a scale counterpart, so the two rules can
+      overlap.
+    assert: >
+      Two relationship records in the same file SHOULD NOT have equal scope, context,
+      `$ref` (or inline value) and `setUuid`.
+    message: "Relationship {scope} (context '{context}') repeats an earlier record with the same {ref_or_value}; remove the duplicate"
+    spec_ref: spec/relationship-format.md
+    introduced_in: "1.0.0-draft"

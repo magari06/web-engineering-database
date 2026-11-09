@@ -1,0 +1,147 @@
+import {isFromFile, isSource} from '../filters/index.js'
+import type {PlatformInitializer} from '../types/platformInitializer.js'
+import type {PlatformConfig, TransformedToken} from 'style-dictionary/types'
+import {outputReferencesTransformed, outputReferencesFilter} from 'style-dictionary/utils'
+
+/**
+ * Determines whether a token's value should use CSS variable references.
+ *
+ * For most tokens, we check both that referenced tokens are in the current output
+ * (outputReferencesFilter) and that the string replacement is valid (outputReferencesTransformed).
+ *
+ * Composite border tokens need special handling because:
+ * 1. outputReferencesTransformed returns false for object original values
+ * 2. outputReferencesFilter returns false because width tokens are in a separate CSS file
+ * Style Dictionary's formatter correctly handles var() substitution in flattened composite strings,
+ * and the referenced tokens (borderColor.*, borderWidth.*, focus.outline-*) all exist as CSS variables at runtime.
+ */
+const shouldOutputReferences = (
+  token: TransformedToken,
+  platformOptions: Parameters<typeof outputReferencesFilter>[1],
+) => {
+  if (token.$type === 'border') {
+    return true
+  }
+  return outputReferencesFilter(token, platformOptions) && outputReferencesTransformed(token, platformOptions)
+}
+
+const getCssSelectors = (outputFile: string) => {
+  // check for dark in the beginning of the output filename
+  const lastSlash = outputFile.lastIndexOf('/')
+  const outputBasename = outputFile.substring(lastSlash + 1, outputFile.indexOf('.'))
+  const themeName = outputBasename.replace(/-/g, '_')
+  const mode = outputBasename.substring(0, 4) === 'dark' ? 'dark' : 'light'
+
+  return [
+    {
+      selector: `[data-color-mode="${mode}"][data-${mode}-theme="${themeName}"], [data-color-mode="auto"][data-light-theme="${themeName}"]`,
+    },
+    {
+      query: '@media (prefers-color-scheme: dark)',
+      // [data-color-mode] here is duplicated to increase the specificity so that light mode can't override it when prefers-color-scheme: dark is enabled
+      selector: `[data-color-mode][data-color-mode="auto"][data-dark-theme="${themeName}"]`,
+    },
+  ]
+}
+
+export const css: PlatformInitializer = (outputFile, prefix, buildPath, options): PlatformConfig => {
+  return {
+    prefix,
+    buildPath,
+    preprocessors: ['themeOverrides'],
+    transforms: [
+      'name/pathToKebabCase',
+      'color/hex',
+      'cubicBezier/css',
+      'dimension/rem',
+      'duration/css',
+      'shadow/css',
+      'border/css',
+      'typography/css',
+      'transition/css',
+      'fontFamily/css',
+      'fontWeight/number',
+      'gradient/css',
+    ],
+    options: {
+      basePxFontSize: 16,
+      themeOverrides: {
+        theme: options?.theme,
+      },
+    },
+    files: [
+      {
+        destination: `${outputFile}`,
+        format: `css/advanced`,
+        filter: token =>
+          isSource(token) &&
+          options?.themed === true &&
+          token.$type !== 'custom-viewportRange' &&
+          token.$type !== 'dimension' &&
+          !isFromFile(token, [
+            'src/tokens/functional/size/size-coarse.json5',
+            'src/tokens/functional/size/size-fine.json5',
+          ]),
+        options: {
+          showFileHeader: false,
+          outputReferences: shouldOutputReferences,
+          descriptions: false,
+          queries: getCssSelectors(outputFile),
+          ...options?.options,
+        },
+      },
+      {
+        destination: `${outputFile}`,
+        format: `css/advanced`,
+        filter: token =>
+          isSource(token) &&
+          options?.themed !== true &&
+          token.$type !== 'custom-viewportRange' &&
+          !isFromFile(token, [
+            'src/tokens/functional/size/size-coarse.json5',
+            'src/tokens/functional/size/size-fine.json5',
+          ]),
+        options: {
+          showFileHeader: false,
+          outputReferences: shouldOutputReferences,
+          descriptions: false,
+          ...options?.options,
+        },
+      },
+      {
+        destination: `${outputFile}`,
+        format: `css/customMedia`,
+        filter: token => isSource(token) && options?.themed !== true && token.$type === 'custom-viewportRange',
+        options: {
+          showFileHeader: false,
+          outputReferences: shouldOutputReferences,
+        },
+      },
+      {
+        destination: `${outputFile}`,
+        format: `css/advanced`,
+        filter: token =>
+          isSource(token) &&
+          isFromFile(token, [
+            'src/tokens/functional/size/size-coarse.json5',
+            'src/tokens/functional/size/size-fine.json5',
+          ]),
+        options: {
+          descriptions: false,
+          outputReferences: shouldOutputReferences,
+          showFileHeader: false,
+          queries: [
+            {
+              query: '@media (pointer: fine)',
+              matcher: (token: TransformedToken) => token.filePath.includes('size-fine'),
+            },
+            {
+              query: '@media (pointer: coarse)',
+              matcher: (token: TransformedToken) => token.filePath.includes('size-coarse'),
+            },
+          ],
+        },
+      },
+    ],
+  }
+}

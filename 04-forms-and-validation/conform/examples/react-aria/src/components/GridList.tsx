@@ -1,0 +1,38 @@
+import {
+	Button,
+	Checkbox,
+	GridList as AriaGridList,
+	GridListItem as AriaGridListItem,
+} from 'react-aria-components';
+import type { GridListItemProps, GridListProps } from 'react-aria-components';
+
+import './GridList.css';
+
+export function GridList<T extends object>({
+	children,
+	...props
+}: GridListProps<T>) {
+	return <AriaGridList {...props}>{children}</AriaGridList>;
+}
+
+export { GridList as MyGridList };
+
+export function GridListItem({ children, ...props }: GridListItemProps) {
+	const textValue = typeof children === 'string' ? children : undefined;
+	return (
+		<AriaGridListItem textValue={textValue} {...props}>
+			{({ selectionMode, selectionBehavior, allowsDragging }) => (
+				<>
+					{/* Add elements for drag and drop and selection. */}
+					{allowsDragging && <Button slot="drag">≡</Button>}
+					{selectionMode === 'multiple' && selectionBehavior === 'toggle' && (
+						<Checkbox slot="selection" />
+					)}
+					{children}
+				</>
+			)}
+		</AriaGridListItem>
+	);
+}
+
+export { GridListItem as MyItem };

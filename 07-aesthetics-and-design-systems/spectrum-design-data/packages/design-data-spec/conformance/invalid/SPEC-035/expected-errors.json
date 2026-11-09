@@ -1,0 +1,10 @@
+{
+  "layer": 2,
+  "errors": [
+    {
+      "rule_id": "SPEC-035",
+      "severity": "warning",
+      "message_pattern": ".*not in the spectrum-design-data registry/anatomy-terms vocabulary.*"
+    }
+  ]
+}
