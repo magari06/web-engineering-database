@@ -1,43 +1,90 @@
 param(
     [Parameter(Mandatory = $false)]
-    [string]$TargetPath = "."
+    [string]$TargetPath = "",
+    [Parameter(Mandatory = $false)]
+    [string]$Url = ""
 )
 
 $ErrorActionPreference = "SilentlyContinue"
-$resolvedPath = (Resolve-Path $TargetPath).Path
-if (-not $resolvedPath) {
-    Write-Error "Target path '$TargetPath' not found."
-    exit 1
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
+
+$isUrlMode = $false
+if ($Url -match "^https?://") {
+    $isUrlMode = $true
+} elseif ($TargetPath -match "^https?://") {
+    $Url = $TargetPath
+    $isUrlMode = $true
 }
 
 Write-Output "================================================================="
 Write-Output " WEBSITE 360 AUDIT SCANNER (8 Areas / 40 Questions + 09 SEO/GEO)"
-Write-Output " Target: $resolvedPath"
+if ($isUrlMode) {
+    Write-Output " Mode: LIVE URL AUDIT ($Url)"
+} else {
+    if (-not $TargetPath) { $TargetPath = "." }
+    $resolvedPath = (Resolve-Path $TargetPath).Path
+    Write-Output " Mode: LOCAL CODEBASE AUDIT ($resolvedPath)"
+}
 Write-Output " Database Reference: $env:USERPROFILE/Desktop/websites/database"
 Write-Output "================================================================="
 
-$excludeDirs = @("node_modules", ".git", ".next", "dist", "build", ".astro", ".svelte-kit", "vendor", "database")
+$allMarkup = ""
+$allStyles = ""
+$headers = @{}
+$hasRobots = $false
+$hasSitemap = $false
+$hasLlmsTxt = $false
+$markupFileCount = 1
 
-$markupFiles = Get-ChildItem -Path $resolvedPath -Recurse -File -Include *.html, *.htm, *.jsx, *.tsx, *.vue, *.astro, *.svelte | Where-Object {
-    $full = $_.FullName
-    $skip = $false
-    foreach ($ex in $excludeDirs) {
-        if ($full -match "[\\/]$ex[\\/]") { $skip = $true; break }
+if ($isUrlMode) {
+    $uri = [System.Uri]$Url
+    $baseUrl = "$($uri.Scheme)://$($uri.Host)"
+    try {
+        $resp = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 15 -Headers @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) WebsiteAuditBot/1.0" }
+        $allMarkup = $resp.Content
+        foreach ($k in $resp.Headers.Keys) {
+            $headers[$k.ToLower()] = ($resp.Headers[$k] -join ", ")
+        }
+        $cssLinks = [regex]::Matches($allMarkup, '<link[^>]+rel=["'']stylesheet["''][^>]+href=["'']([^"'']+)["'']|<link[^>]+href=["'']([^"'']+\.css[^"'']*)["'']', "IgnoreCase")
+        foreach ($m in $cssLinks) {
+            $cssHref = if ($m.Groups[1].Value) { $m.Groups[1].Value } else { $m.Groups[2].Value }
+            if ($cssHref) {
+                $fullCssUrl = if ($cssHref -match "^https?://") { $cssHref } elseif ($cssHref.StartsWith("//")) { "$($uri.Scheme):$cssHref" } elseif ($cssHref.StartsWith("/")) { "$baseUrl$cssHref" } else { "$baseUrl/$cssHref" }
+                try {
+                    $cssResp = Invoke-WebRequest -Uri $fullCssUrl -UseBasicParsing -TimeoutSec 10
+                    $allStyles += "`n" + $cssResp.Content
+                } catch {}
+            }
+        }
+        $inlineStyles = [regex]::Matches($allMarkup, '<style[^>]*>([\s\S]*?)</style>', "IgnoreCase")
+        foreach ($st in $inlineStyles) { $allStyles += "`n" + $st.Groups[1].Value }
+    } catch {
+        Write-Error "Failed to fetch URL '$Url': $_"
+        exit 1
     }
-    -not $skip
-}
 
-$styleFiles = Get-ChildItem -Path $resolvedPath -Recurse -File -Include *.css, *.scss, *.less | Where-Object {
-    $full = $_.FullName
-    $skip = $false
-    foreach ($ex in $excludeDirs) {
-        if ($full -match "[\\/]$ex[\\/]") { $skip = $true; break }
+    try { $r = Invoke-WebRequest -Uri "$baseUrl/robots.txt" -UseBasicParsing -TimeoutSec 5; if ($r.StatusCode -eq 200) { $hasRobots = $true } } catch {}
+    try { $s = Invoke-WebRequest -Uri "$baseUrl/sitemap.xml" -UseBasicParsing -TimeoutSec 5; if ($s.StatusCode -eq 200) { $hasSitemap = $true } } catch {}
+    try { $l = Invoke-WebRequest -Uri "$baseUrl/llms.txt" -UseBasicParsing -TimeoutSec 5; if ($l.StatusCode -eq 200) { $hasLlmsTxt = $true } } catch {}
+} else {
+    $excludeDirs = @("node_modules", ".git", ".next", "dist", "build", ".astro", ".svelte-kit", "vendor", "database")
+    $markupFiles = Get-ChildItem -Path $resolvedPath -Recurse -File -Include *.html, *.htm, *.jsx, *.tsx, *.vue, *.astro, *.svelte | Where-Object {
+        $full = $_.FullName; $skip = $false
+        foreach ($ex in $excludeDirs) { if ($full -match "[\\/]$ex[\\/]") { $skip = $true; break } }
+        -not $skip
     }
-    -not $skip
+    $styleFiles = Get-ChildItem -Path $resolvedPath -Recurse -File -Include *.css, *.scss, *.less | Where-Object {
+        $full = $_.FullName; $skip = $false
+        foreach ($ex in $excludeDirs) { if ($full -match "[\\/]$ex[\\/]") { $skip = $true; break } }
+        -not $skip
+    }
+    $markupFileCount = $markupFiles.Count
+    $allMarkup = ($markupFiles | ForEach-Object { Get-Content $_.FullName -Raw }) -join "`n"
+    $allStyles = ($styleFiles | ForEach-Object { Get-Content $_.FullName -Raw }) -join "`n"
+    $hasRobots = Test-Path (Join-Path $resolvedPath "robots.txt") -or Test-Path (Join-Path $resolvedPath "public/robots.txt")
+    $hasSitemap = Test-Path (Join-Path $resolvedPath "sitemap.xml") -or Test-Path (Join-Path $resolvedPath "public/sitemap.xml")
+    $hasLlmsTxt = Test-Path (Join-Path $resolvedPath "llms.txt") -or Test-Path (Join-Path $resolvedPath "public/llms.txt")
 }
-
-$allMarkup = ($markupFiles | ForEach-Object { Get-Content $_.FullName -Raw }) -join "`n"
-$allStyles = ($styleFiles | ForEach-Object { Get-Content $_.FullName -Raw }) -join "`n"
 
 function Report-Check {
     param([string]$Code, [string]$Name, [bool]$Passed, [string]$Details)
@@ -47,7 +94,7 @@ function Report-Check {
 
 Write-Output "`n--- 01. NAWIGACJA (Navigation & Information Architecture) ---"
 $hasHeaderNav = $allMarkup -match "<header\b" -and $allMarkup -match "<nav\b"
-$hasSkipLink = $allMarkup -match "skip-link|skip-to-content|#main-content|#main\b"
+$hasSkipLink = $allMarkup -match "skip-link|skip-to-content|#main-content|#main\b|skipnav"
 $hasAriaCurrent = $allMarkup -match "aria-current="
 $hasBreadcrumbs = $allMarkup -match "Breadcrumb|breadcrumb"
 $hasSearch = $allMarkup -match "<search\b|role=[`"']search[`"']|type=[`"']search[`"']|cmdk"
@@ -66,7 +113,7 @@ $imgsWithDims = 0
 foreach ($img in $imgTags) {
     if ($img.Value -match "width=" -or $img.Value -match "aspect-ratio") { $imgsWithDims++ }
 }
-Report-Check "Q2.1" "Heading H1 Presence" ($h1Matches -ge 1) "Total <h1> tags across files: $h1Matches (Markup files: $($markupFiles.Count))"
+Report-Check "Q2.1" "Heading H1 Presence" ($h1Matches -ge 1) "Total <h1> tags: $h1Matches (Files scanned: $markupFileCount)"
 Report-Check "Q2.2" "HTML5 Landmarks (<main>, <footer>)" ($hasMain -and $hasFooter) "main: $hasMain, footer: $hasFooter"
 Report-Check "Q2.3" "Modern CSS Grid / Flexbox" $hasGridFlex "Grid/Flex detected: $hasGridFlex"
 Report-Check "Q2.4" "Container Queries (@container)" $hasContainerQuery "Container queries detected: $hasContainerQuery"
@@ -112,15 +159,21 @@ Report-Check "Q6.5" "Respects prefers-reduced-motion" $hasReducedMotion "@media 
 Write-Output "`n--- 07. ESTETYKA (Design Systems & Brand Tokens) ---"
 $cssVarDefs = [regex]::Matches($allStyles, "--[a-zA-Z0-9_-]+\s*:").Count
 $rawHexCount = [regex]::Matches($allStyles, "#[0-9a-fA-F]{3,8}\b").Count
-$hasDarkMode = ($allStyles + $allMarkup) -match "prefers-color-scheme:\s*dark|color-scheme:\s*light\s+dark|\.dark\b"
+$hasDarkMode = ($allStyles + $allMarkup) -match "prefers-color-scheme:\s*dark|color-scheme:\s*light\s+dark|\.dark\b|data-theme"
 Report-Check "Q7.1" "Design Tokens (--* CSS Custom Properties)" ($cssVarDefs -ge 5) "CSS Custom Property definitions: $cssVarDefs, Raw HEX count: $rawHexCount"
-Report-Check "Q7.2" "Dark / Light Theme Support" $hasDarkMode "Dark mode media query or class detected: $hasDarkMode"
+Report-Check "Q7.2" "Dark / Light Theme Support" $hasDarkMode "Dark mode media query or theme attribute detected: $hasDarkMode"
 
 Write-Output "`n--- 08. BEZPIECZENSTWO (Security, HTTPS & Data Protection) ---"
 $httpLinks = [regex]::Matches($allMarkup, "http://(?!localhost|127\.0\.0\.1|www\.w3\.org|schema\.org)").Count
 $unsafeInner = [regex]::Matches($allMarkup, "dangerouslySetInnerHTML|\.innerHTML\s*=").Count
 $hasDomPurify = $allMarkup -match "DOMPurify|sanitize"
 Report-Check "Q8.1" "Zero Mixed Content (No insecure http://)" ($httpLinks -eq 0) "Insecure http:// links found: $httpLinks"
+if ($isUrlMode) {
+    $hasHsts = $headers.ContainsKey("strict-transport-security")
+    $hasCsp = $headers.ContainsKey("content-security-policy")
+    $hasNosniff = $headers.ContainsKey("x-content-type-options")
+    Report-Check "Q8.2" "Live HTTP Security Headers (HSTS, CSP, nosniff)" ($hasHsts -and $hasCsp -and $hasNosniff) "HSTS: $hasHsts, CSP: $hasCsp, X-Content-Type-Options: $hasNosniff"
+}
 Report-Check "Q8.4" "DOM XSS Protection (No raw innerHTML)" ($unsafeInner -eq 0 -or $hasDomPurify) "Raw innerHTML/dangerouslySetInnerHTML: $unsafeInner (DOMPurify: $hasDomPurify)"
 
 Write-Output "`n--- 09. DODATKOWE: SEO, GEO (AI-Search) & INFRASTRUCTURE ---"
@@ -128,9 +181,6 @@ $hasTitle = $allMarkup -match "<title\b"
 $hasMetaDesc = $allMarkup -match "name=[`"']description[`"']"
 $hasCanonical = $allMarkup -match "rel=[`"']canonical[`"']"
 $hasSchemaJsonLd = $allMarkup -match "application/ld\+json"
-$hasRobots = Test-Path (Join-Path $resolvedPath "robots.txt") -or Test-Path (Join-Path $resolvedPath "public/robots.txt")
-$hasSitemap = Test-Path (Join-Path $resolvedPath "sitemap.xml") -or Test-Path (Join-Path $resolvedPath "public/sitemap.xml")
-$hasLlmsTxt = Test-Path (Join-Path $resolvedPath "llms.txt") -or Test-Path (Join-Path $resolvedPath "public/llms.txt")
 Report-Check "SEO.1" "Meta Title, Description & Canonical" ($hasTitle -and $hasMetaDesc) "Title: $hasTitle, Description: $hasMetaDesc, Canonical: $hasCanonical"
 Report-Check "SEO.2" "Schema.org JSON-LD Structured Data" $hasSchemaJsonLd "application/ld+json present: $hasSchemaJsonLd"
 Report-Check "GEO.1" "robots.txt, sitemap.xml & /llms.txt" ($hasRobots -and $hasSitemap -and $hasLlmsTxt) "robots.txt: $hasRobots, sitemap.xml: $hasSitemap, llms.txt: $hasLlmsTxt"
